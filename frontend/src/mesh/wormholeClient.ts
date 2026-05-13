@@ -212,10 +212,13 @@ export async function fetchWormholeSettings(
   return inflight;
 }
 
-export async function connectWormhole(): Promise<WormholeState> {
+export async function connectWormhole(
+  options: { requireAdminSession?: boolean } = {},
+): Promise<WormholeState> {
   resetWormholeCaches();
   const res = await controlPlaneFetch('/api/wormhole/connect', {
     method: 'POST',
+    requireAdminSession: options.requireAdminSession,
   });
   const state = await parseState(res);
   wormholeStateCache = {

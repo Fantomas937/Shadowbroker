@@ -735,7 +735,7 @@ async def api_wormhole_dm_invite_handle_revoke(request: Request, handle: str):
     return revoke_prekey_lookup_handle(handle)
 
 
-@router.post("/api/wormhole/dm/invite/import", dependencies=[Depends(require_admin)])
+@router.post("/api/wormhole/dm/invite/import", dependencies=[Depends(require_local_operator)])
 @limiter.limit("30/minute")
 async def api_wormhole_dm_invite_import(request: Request, body: WormholeDmInviteImportRequest):
     return import_wormhole_dm_invite(

@@ -1386,7 +1386,12 @@ def _peer_sync_response(peer_url: str, body: dict[str, Any]) -> dict[str, Any]:
     if _infonet_private_transport_required() and not _is_private_infonet_transport(transport):
         raise RuntimeError(_infonet_private_transport_error())
 
-    timeout = int(get_settings().MESH_RELAY_PUSH_TIMEOUT_S or 10)
+    settings = get_settings()
+    timeout = int(
+        getattr(settings, "MESH_SYNC_TIMEOUT_S", 0)
+        or getattr(settings, "MESH_RELAY_PUSH_TIMEOUT_S", 0)
+        or 10
+    )
     kwargs: dict[str, Any] = {
         "json": body,
         "timeout": timeout,
@@ -1509,6 +1514,8 @@ def _run_public_sync_cycle() -> SyncWorkerState:
 
     records = _filter_infonet_sync_records(store.records())
     peers = eligible_sync_peers(records, now=time.time())
+    max_peers = max(1, int(getattr(get_settings(), "MESH_SYNC_MAX_PEERS_PER_CYCLE", 0) or 3))
+    peers = peers[:max_peers]
     with _NODE_RUNTIME_LOCK:
         current_state = get_sync_state()
     if not peers:
@@ -1571,14 +1578,25 @@ def _run_public_sync_cycle() -> SyncWorkerState:
             return updated
 
         last_error = error
+        settings = get_settings()
+        is_seed_peer = str(getattr(record, "role", "") or "").strip().lower() == "seed"
+        cooldown_s = int(getattr(settings, "MESH_RELAY_FAILURE_COOLDOWN_S", 120) or 120)
+        if is_seed_peer:
+            cooldown_s = int(
+                getattr(settings, "MESH_BOOTSTRAP_SEED_FAILURE_COOLDOWN_S", cooldown_s)
+                or cooldown_s
+            )
         store.mark_failure(
             record.peer_url,
             "sync",
             error=error,
-            cooldown_s=int(get_settings().MESH_RELAY_FAILURE_COOLDOWN_S or 120),
+            cooldown_s=cooldown_s,
             now=time.time(),
         )
         store.save()
+        failure_backoff_s = int(settings.MESH_SYNC_FAILURE_BACKOFF_S or 60)
+        if is_seed_peer:
+            failure_backoff_s = min(failure_backoff_s, max(1, cooldown_s))
         updated = finish_sync(
             started,
             ok=False,
@@ -1588,7 +1606,7 @@ def _run_public_sync_cycle() -> SyncWorkerState:
             fork_detected=forked,
             now=time.time(),
             interval_s=int(get_settings().MESH_SYNC_INTERVAL_S or 300),
-            failure_backoff_s=int(get_settings().MESH_SYNC_FAILURE_BACKOFF_S or 60),
+            failure_backoff_s=failure_backoff_s,
         )
         with _NODE_RUNTIME_LOCK:
             set_sync_state(updated)
@@ -9860,7 +9878,7 @@ async def api_wormhole_dm_invite_handle_revoke(request: Request, handle: str):
     return revoke_prekey_lookup_handle(handle)
 
 
-@app.post("/api/wormhole/dm/invite/import", dependencies=[Depends(require_admin)])
+@app.post("/api/wormhole/dm/invite/import", dependencies=[Depends(require_local_operator)])
 @limiter.limit("30/minute")
 async def api_wormhole_dm_invite_import(request: Request, body: WormholeDmInviteImportRequest):
     return import_wormhole_dm_invite(

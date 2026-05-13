@@ -1327,6 +1327,7 @@ describe('wormholeIdentityClient strict profile hints', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        requireAdminSession: false,
         body: JSON.stringify({
           invite: { event_type: 'dm_invite' },
           alias: 'field contact',
@@ -1378,6 +1379,7 @@ describe('wormholeIdentityClient strict profile hints', () => {
     const prepared = await mod.prepareWormholeInteractiveLane({ bootstrapIdentity: true });
 
     expect(connectWormhole).toHaveBeenCalledTimes(1);
+    expect(connectWormhole).toHaveBeenCalledWith({ requireAdminSession: false });
     expect(joinWormhole).not.toHaveBeenCalled();
     expect(prepared).toEqual(
       expect.objectContaining({

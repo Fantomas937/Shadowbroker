@@ -881,7 +881,7 @@ export async function prepareWormholeInteractiveLane(
     let settings = await fetchWormholeSettings(true).catch(() => null);
     if (!runtime?.ready) {
       if (settings?.enabled || runtime?.configured) {
-        runtime = await connectWormhole().catch((error) => {
+        runtime = await connectWormhole({ requireAdminSession: false }).catch((error) => {
           throw new Error(
             normalizeWormholeInteractivePrepError(
               error instanceof Error ? error.message : 'wormhole_connect_failed',
@@ -1055,6 +1055,7 @@ export async function importWormholeDmInvite(
       invite,
       alias,
     }),
+    requireAdminSession: false,
   });
   const data = (await response.json().catch(() => ({}))) as WormholeDmInviteImportResult & {
     message?: string;

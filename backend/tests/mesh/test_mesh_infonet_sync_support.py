@@ -37,6 +37,30 @@ def test_eligible_sync_peers_filters_bucket_and_cooldown():
     assert [record.peer_url for record in candidates] == ["https://active.example"]
 
 
+def test_eligible_sync_peers_prioritizes_explicit_bootstrap_seed():
+    old_runtime = make_sync_peer_record(
+        peer_url="https://old-runtime.example",
+        transport="clearnet",
+        role="participant",
+        source="runtime",
+        now=100,
+    )
+    seed = make_sync_peer_record(
+        peer_url="https://node.shadowbroker.info",
+        transport="clearnet",
+        role="seed",
+        source="bundle",
+        now=200,
+    )
+
+    candidates = eligible_sync_peers([old_runtime, seed], now=300)
+
+    assert [record.peer_url for record in candidates] == [
+        "https://node.shadowbroker.info",
+        "https://old-runtime.example",
+    ]
+
+
 def test_finish_sync_success_updates_schedule():
     state = begin_sync(SyncWorkerState(), peer_url="https://seed.example", now=100)
     finished = finish_sync(

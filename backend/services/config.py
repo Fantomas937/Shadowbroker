@@ -46,9 +46,12 @@ class Settings(BaseSettings):
     MESH_NODE_MODE: str = "participant"
     MESH_SYNC_INTERVAL_S: int = 300
     MESH_SYNC_FAILURE_BACKOFF_S: int = 60
+    MESH_SYNC_TIMEOUT_S: int = 5
+    MESH_SYNC_MAX_PEERS_PER_CYCLE: int = 3
     MESH_RELAY_PUSH_TIMEOUT_S: int = 10
     MESH_RELAY_MAX_FAILURES: int = 3
     MESH_RELAY_FAILURE_COOLDOWN_S: int = 120
+    MESH_BOOTSTRAP_SEED_FAILURE_COOLDOWN_S: int = 15
     MESH_PEER_PUSH_SECRET: str = ""
     MESH_RNS_APP_NAME: str = "shadowbroker"
     MESH_RNS_ASPECT: str = "infonet"

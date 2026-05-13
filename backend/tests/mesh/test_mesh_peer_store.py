@@ -96,3 +96,38 @@ def test_peer_store_failure_and_success_lifecycle(tmp_path):
     assert recovered.cooldown_until == 0
     assert recovered.last_error == ""
     assert recovered.last_sync_ok_at == 250
+
+
+def test_upsert_explicit_seed_clears_stale_cooldown(tmp_path):
+    store = PeerStore(tmp_path / "peer_store.json")
+    store.upsert(
+        make_sync_peer_record(
+            peer_url="https://node.shadowbroker.info",
+            transport="clearnet",
+            role="seed",
+            source="bundle",
+            now=100,
+        )
+    )
+    failed = store.mark_failure(
+        "https://node.shadowbroker.info",
+        "sync",
+        error="timed out",
+        cooldown_s=120,
+        now=110,
+    )
+    assert failed.cooldown_until == 230
+
+    refreshed = store.upsert(
+        make_sync_peer_record(
+            peer_url="https://node.shadowbroker.info",
+            transport="clearnet",
+            role="seed",
+            source="bundle",
+            now=120,
+        )
+    )
+
+    assert refreshed.failure_count == 0
+    assert refreshed.cooldown_until == 0
+    assert refreshed.last_error == ""

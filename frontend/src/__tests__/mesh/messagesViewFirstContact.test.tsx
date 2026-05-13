@@ -61,8 +61,29 @@ const mocks = vi.hoisted(() => ({
   bootstrapDecryptAccessRequest: vi.fn(async () => 'offer'),
   bootstrapEncryptAccessRequest: vi.fn(async () => 'x3dh1:bootstrap'),
   canUseWormholeBootstrap: vi.fn(async () => false),
+  bootstrapWormholeIdentity: vi.fn(async () => ({
+    node_id: '!sb_local',
+    public_key: 'local-pub',
+    public_key_algo: 'Ed25519',
+    sequence: 1,
+    protocol_version: 'infonet/2',
+  })),
+  exportWormholeDmInvite: vi.fn(async () => ({
+    ok: true,
+    invite: {
+      event_type: 'dm_invite',
+      payload: {
+        prekey_lookup_handle: 'handle-123',
+        expires_at: 2_000_000_000,
+      },
+    },
+    peer_id: '!sb_local',
+    trust_fingerprint: 'trustfp123456',
+    prekey_publish_pending: false,
+  })),
   fetchWormholeStatus: vi.fn(async () => ({ ready: true, transport_tier: 'private_strong' })),
   fetchWormholeIdentity: vi.fn(async () => ({ node_id: '!sb_local', public_key: 'local-pub' })),
+  listWormholeDmInviteHandles: vi.fn(async () => ({ ok: true, addresses: [] })),
   prepareWormholeInteractiveLane: vi.fn(async () => ({
     ready: true,
     settingsEnabled: true,
@@ -75,10 +96,13 @@ const mocks = vi.hoisted(() => ({
     trust_fingerprint: 'invitefp',
     trust_level: 'invite_pinned',
   })),
+  renameWormholeDmInviteHandle: vi.fn(async () => ({ ok: true })),
+  revokeWormholeDmInviteHandle: vi.fn(async () => ({ ok: true, revoked: true })),
   isWormholeReady: vi.fn(async () => true),
   isWormholeSecureRequired: vi.fn(async () => false),
   issueWormholePairwiseAlias: vi.fn(async () => ({ ok: true, shared_alias: 'alias-123' })),
   openWormholeSenderSeal: vi.fn(async () => ({ sender_id: '!sb_peer', seal_verified: true })),
+  writeClipboard: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/lib/api', () => ({
@@ -152,8 +176,10 @@ vi.mock('@/mesh/wormholeDmBootstrapClient', () => ({
 }));
 
 vi.mock('@/mesh/wormholeIdentityClient', () => ({
+  bootstrapWormholeIdentity: mocks.bootstrapWormholeIdentity,
   fetchWormholeStatus: mocks.fetchWormholeStatus,
   fetchWormholeIdentity: mocks.fetchWormholeIdentity,
+  exportWormholeDmInvite: mocks.exportWormholeDmInvite,
   prepareWormholeInteractiveLane: mocks.prepareWormholeInteractiveLane,
   getWormholeDmInviteImportErrorResult: (error: unknown) =>
     error && typeof error === 'object' && 'result' in (error as Record<string, unknown>)
@@ -162,8 +188,11 @@ vi.mock('@/mesh/wormholeIdentityClient', () => ({
   importWormholeDmInvite: mocks.importWormholeDmInvite,
   isWormholeReady: mocks.isWormholeReady,
   isWormholeSecureRequired: mocks.isWormholeSecureRequired,
+  listWormholeDmInviteHandles: mocks.listWormholeDmInviteHandles,
   issueWormholePairwiseAlias: mocks.issueWormholePairwiseAlias,
   openWormholeSenderSeal: mocks.openWormholeSenderSeal,
+  renameWormholeDmInviteHandle: mocks.renameWormholeDmInviteHandle,
+  revokeWormholeDmInviteHandle: mocks.revokeWormholeDmInviteHandle,
 }));
 
 import MessagesView from '@/components/InfonetTerminal/MessagesView';
@@ -191,10 +220,21 @@ describe('MessagesView first-contact trust UX', () => {
     localStorage.clear();
     contactsState = {};
     vi.clearAllMocks();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: mocks.writeClipboard },
+      configurable: true,
+    });
 
     mocks.getContacts.mockImplementation(() => contactsState);
     mocks.hydrateWormholeContacts.mockImplementation(async () => contactsState);
     mocks.fetchWormholeStatus.mockResolvedValue({ ready: true, transport_tier: 'private_strong' });
+    mocks.bootstrapWormholeIdentity.mockResolvedValue({
+      node_id: '!sb_local',
+      public_key: 'local-pub',
+      public_key_algo: 'Ed25519',
+      sequence: 1,
+      protocol_version: 'infonet/2',
+    });
     mocks.prepareWormholeInteractiveLane.mockResolvedValue({
       ready: true,
       settingsEnabled: true,
@@ -215,6 +255,20 @@ describe('MessagesView first-contact trust UX', () => {
     mocks.fetchDmPublicKey.mockResolvedValue({ dh_pub_key: 'peer-dh', dh_algo: 'X25519' });
     mocks.sendOffLedgerConsentMessage.mockResolvedValue({ ok: true, transport: 'relay' });
     mocks.canUseWormholeBootstrap.mockResolvedValue(false);
+    mocks.exportWormholeDmInvite.mockResolvedValue({
+      ok: true,
+      invite: {
+        event_type: 'dm_invite',
+        payload: {
+          prekey_lookup_handle: 'handle-123',
+          expires_at: 2_000_000_000,
+        },
+      },
+      peer_id: '!sb_local',
+      trust_fingerprint: 'trustfp123456',
+      prekey_publish_pending: false,
+    });
+    mocks.listWormholeDmInviteHandles.mockResolvedValue({ ok: true, addresses: [] });
   });
 
   afterEach(() => {
@@ -285,7 +339,7 @@ describe('MessagesView first-contact trust UX', () => {
     expect(screen.getByRole('button', { name: 'Send Secure Mail' })).toBeEnabled();
   });
 
-  it('warms the private lane in the background before sending secure mail', async () => {
+  it('sends sealed mail without waiting for the private delivery route', async () => {
     contactsState = {
       '!sb_pinned': {
         alias: 'Pinned Peer',
@@ -296,6 +350,17 @@ describe('MessagesView first-contact trust UX', () => {
       },
     };
     mocks.fetchWormholeStatus.mockResolvedValue({ ready: false, transport_tier: 'public_degraded' });
+    mocks.prepareWormholeInteractiveLane.mockImplementation(
+      () =>
+        new Promise(() => {
+          /* background route prep stays pending */
+        }),
+    );
+    mocks.sendDmMessage.mockResolvedValueOnce({
+      ok: true,
+      queued: true,
+      private_transport_pending: true,
+    });
 
     renderMessagesView();
     await openComposeForRecipient('!sb_pinned', 'hello after warmup');
@@ -306,7 +371,8 @@ describe('MessagesView first-contact trust UX', () => {
 
     await waitFor(() => expect(mocks.prepareWormholeInteractiveLane).toHaveBeenCalled(), { timeout: 5000 });
     await waitFor(() => expect(mocks.sendDmMessage).toHaveBeenCalled(), { timeout: 5000 });
-    await screen.findByText(/Mail delivered to Pinned Peer/i, {}, { timeout: 5000 });
+    await screen.findByText(/Mail sealed locally for Pinned Peer/i, {}, { timeout: 5000 });
+    expect(screen.queryByText(/still warming up/i)).not.toBeInTheDocument();
   }, 10000);
 
   it('does not flatten witness policy not met into a generic witnessed root label', async () => {
@@ -358,6 +424,70 @@ describe('MessagesView first-contact trust UX', () => {
     const importButton = await screen.findByRole('button', { name: 'Import Invite' });
     fireEvent.click(importButton);
     expect(screen.getByLabelText(/Local Alias/i)).toHaveValue('!sb_unpinned');
+  });
+
+  it('surfaces pending contact requests in the contact list with approve and deny actions', async () => {
+    localStorage.setItem(
+      'sb_infonet_mailbox_v1:!sb_local',
+      JSON.stringify({
+        version: 1,
+        items: [
+          {
+            id: 'request-1',
+            msgId: 'request-1',
+            folder: 'inbox',
+            kind: 'request',
+            direction: 'inbound',
+            senderId: '!sb_requester',
+            recipientId: '!sb_local',
+            subject: 'Contact request from !sb_requester',
+            body: '!sb_requester wants to open a secure mailbox.',
+            timestamp: 1_778_624_800,
+            read: false,
+            transport: 'relay',
+            deliveryClass: 'request',
+            requestStatus: 'pending',
+            requestDhPubKey: 'requester-dh',
+            requestDhAlgo: 'X25519',
+          },
+        ],
+      }),
+    );
+    mocks.addContact.mockImplementation((peerId: string, dhPubKey: string, _alias?: string, dhAlgo?: string) => {
+      contactsState[peerId] = {
+        alias: 'Requester',
+        blocked: false,
+        dhPubKey,
+        dhAlgo,
+        trust_level: 'unpinned',
+      };
+    });
+
+    renderMessagesView();
+    fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
+
+    expect(await screen.findByText('Contact Requests')).toBeInTheDocument();
+    expect(await screen.findByText('1 pending')).toBeInTheDocument();
+    expect(await screen.findAllByText('!sb_requester')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => expect(mocks.addContact).toHaveBeenCalledWith(
+      '!sb_requester',
+      'peer-dh',
+      undefined,
+      'X25519',
+    ));
+    await waitFor(() =>
+      expect(mocks.sendOffLedgerConsentMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientId: '!sb_requester',
+          recipientDhPub: 'peer-dh',
+        }),
+      ),
+    );
+    expect(await screen.findByText(/Contact accepted: Requester\./i)).toBeInTheDocument();
   });
 
   it('routes continuity reverify from Secure Messages into Dead Drop with SAS visible', async () => {
@@ -465,7 +595,7 @@ describe('MessagesView first-contact trust UX', () => {
     fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
     expect(await screen.findByText("Paste Someone's Address")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText(/Paste the address blob/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Paste the full text copied/i), {
       target: { value: JSON.stringify({ invite: { event_type: 'dm_invite', payload: {} } }) },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Import Address' }));
@@ -473,6 +603,121 @@ describe('MessagesView first-contact trust UX', () => {
     expect(
       await screen.findByText(/INVITE PINNED for !sb_attested \(invitefp\.\.tested\)\./i),
     ).toBeInTheDocument();
+  });
+
+  it('generates and copies the full signed public address instead of the lookup handle', async () => {
+    renderMessagesView();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate Address' }));
+
+    await waitFor(() => expect(mocks.writeClipboard).toHaveBeenCalled());
+    const copied = String(mocks.writeClipboard.mock.calls[0][0] || '');
+    expect(copied).toContain('"type": "shadowbroker.infonet.dm.invite"');
+    expect(copied).toContain('"prekey_lookup_handle": "handle-123"');
+    expect(copied).not.toBe('handle-123');
+    expect(await screen.findByText(/Generated and copied/i)).toBeInTheDocument();
+    expect(screen.getByText(/Signed invite ready/i)).toBeInTheDocument();
+    expect(screen.queryByText(/shadowbroker\.infonet\.dm\.invite/i)).not.toBeInTheDocument();
+  });
+
+  it('does not advertise legacy handle-only addresses as copyable public addresses', async () => {
+    localStorage.setItem(
+      'sb_infonet_dm_addresses_v1:!sb_local',
+      JSON.stringify({
+        version: 1,
+        addresses: [
+          {
+            id: 'legacy-address',
+            label: 'Legacy handle',
+            handle: 'd8ce691f751817e137066f2a1858e21689b0118f8ec485c1',
+            peerId: '',
+            trustFingerprint: '',
+            inviteBlob: '',
+            createdAt: 1_700_000_000,
+          },
+        ],
+      }),
+    );
+
+    renderMessagesView();
+
+    expect(await screen.findByText(/Generate an address, then send it to someone/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
+
+    expect(await screen.findByText('Legacy handle')).toBeInTheDocument();
+    expect(screen.getByText('Address unavailable locally.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled();
+  });
+
+  it('explains raw lookup handles instead of showing a JSON parser error', async () => {
+    renderMessagesView();
+    fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
+    expect(await screen.findByText("Paste Someone's Address")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Paste the full text copied/i), {
+      target: { value: 'f0eee9e9ccf849bcb2d86c0d7a1e0669c75be4e05533b0f6c67' },
+    });
+
+    expect(await screen.findByText(/only a short address ID/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import Address' })).toBeDisabled();
+    expect(screen.queryByText(/Unexpected number in JSON/i)).not.toBeInTheDocument();
+    expect(mocks.importWormholeDmInvite).not.toHaveBeenCalled();
+  });
+
+  it('hides pasted signed address JSON until advanced details are opened', async () => {
+    const signedAddress = JSON.stringify({
+      type: 'shadowbroker.infonet.dm.invite',
+      version: 1,
+      invite: { event_type: 'dm_invite', payload: {} },
+    });
+
+    renderMessagesView();
+    fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
+    expect(await screen.findByText("Paste Someone's Address")).toBeInTheDocument();
+
+    const addressField = screen.getByPlaceholderText(/Paste the full text copied/i);
+    fireEvent.paste(addressField, {
+      clipboardData: {
+        getData: () => signedAddress,
+      },
+    });
+
+    expect(screen.getByDisplayValue(/Copied address received\. Ready to import\./i)).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/shadowbroker\.infonet\.dm\.invite/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced Details' }));
+
+    expect(screen.getByLabelText('Raw copied public address')).toHaveValue(signedAddress);
+  });
+
+  it('imports a copied address without waiting for secure mail warm-up', async () => {
+    mocks.fetchWormholeStatus.mockResolvedValue({ ready: false, transport_tier: 'public_degraded' });
+    mocks.prepareWormholeInteractiveLane.mockImplementation(
+      () =>
+        new Promise(() => {
+          /* background warm-up stays pending */
+        }),
+    );
+    mocks.importWormholeDmInvite.mockResolvedValueOnce({
+      ok: true,
+      peer_id: '!sb_now',
+      trust_fingerprint: 'invitefp-now',
+      trust_level: 'invite_pinned',
+      contact: {},
+    });
+
+    renderMessagesView();
+    fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
+    expect(await screen.findByText("Paste Someone's Address")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Paste the full text copied/i), {
+      target: { value: JSON.stringify({ invite: { event_type: 'dm_invite', payload: {} } }) },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Import Address' }));
+
+    expect(await screen.findByText(/INVITE PINNED for !sb_now \(invitefp-now\)\./i)).toBeInTheDocument();
+    expect(mocks.importWormholeDmInvite).toHaveBeenCalled();
+    expect(screen.queryByText(/Secure mail is still warming up/i)).not.toBeInTheDocument();
   });
 
   it('announces compat invite imports as TOFU PINNED with backend detail', async () => {
@@ -489,7 +734,7 @@ describe('MessagesView first-contact trust UX', () => {
     fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
     expect(await screen.findByText("Paste Someone's Address")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText(/Paste the address blob/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Paste the full text copied/i), {
       target: { value: JSON.stringify({ invite: { event_type: 'dm_invite', payload: {} } }) },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Import Address' }));
@@ -538,7 +783,7 @@ describe('MessagesView first-contact trust UX', () => {
     fireEvent.click(screen.getByRole('button', { name: 'CONTACTS' }));
     expect(await screen.findByText("Paste Someone's Address")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText(/Paste the address blob/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Paste the full text copied/i), {
       target: { value: JSON.stringify({ invite: { event_type: 'dm_invite', payload: {} } }) },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Import Address' }));
@@ -552,7 +797,7 @@ describe('MessagesView first-contact trust UX', () => {
   });
 
   it('uses non-blocking secure-mail startup language while the DM lane warms', async () => {
-    mocks.fetchWormholeStatus.mockResolvedValueOnce({ ready: false, transport_tier: 'public_degraded' });
+    mocks.fetchWormholeStatus.mockResolvedValue({ ready: false, transport_tier: 'public_degraded' });
     mocks.prepareWormholeInteractiveLane.mockImplementation(
       () =>
         new Promise(() => {
@@ -563,9 +808,9 @@ describe('MessagesView first-contact trust UX', () => {
     renderMessagesView();
 
     expect(
-      await screen.findByText(/Private message delivery is connecting/i),
+      await screen.findByText(/Private delivery route is connecting/i),
     ).toBeInTheDocument();
-    expect(screen.getByText(/generate and copy your public address now/i)).toBeInTheDocument();
+    expect(screen.getByText(/Addresses, contacts, and sealed sends can proceed now/i)).toBeInTheDocument();
     expect(screen.queryByText(/LOCKED/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/enter the Wormhole/i)).not.toBeInTheDocument();
   });

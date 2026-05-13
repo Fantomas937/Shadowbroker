@@ -258,6 +258,12 @@ class PeerStore:
             self._records[record.record_key()] = record
             return record
 
+        explicit_seed_refresh = (
+            record.bucket == "sync"
+            and record.role == "seed"
+            and record.source in {"bundle", "bootstrap_promoted"}
+        )
+
         merged = PeerRecord(
             bucket=record.bucket,
             source=record.source,
@@ -272,9 +278,9 @@ class PeerStore:
             last_seen_at=max(existing.last_seen_at, record.last_seen_at),
             last_sync_ok_at=max(existing.last_sync_ok_at, record.last_sync_ok_at),
             last_push_ok_at=max(existing.last_push_ok_at, record.last_push_ok_at),
-            last_error=record.last_error or existing.last_error,
-            failure_count=max(existing.failure_count, record.failure_count),
-            cooldown_until=max(existing.cooldown_until, record.cooldown_until),
+            last_error="" if explicit_seed_refresh else record.last_error or existing.last_error,
+            failure_count=0 if explicit_seed_refresh else max(existing.failure_count, record.failure_count),
+            cooldown_until=0 if explicit_seed_refresh else max(existing.cooldown_until, record.cooldown_until),
             metadata={**existing.metadata, **record.metadata},
         )
         self._records[record.record_key()] = merged

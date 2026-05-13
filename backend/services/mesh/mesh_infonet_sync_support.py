@@ -30,10 +30,19 @@ def eligible_sync_peers(records: list[PeerRecord], *, now: float | None = None) 
         for record in records
         if record.bucket == "sync" and record.enabled and int(record.cooldown_until or 0) <= current_time
     ]
+
+    def _seed_priority(record: PeerRecord) -> int:
+        role = str(record.role or "").strip().lower()
+        source = str(record.source or "").strip().lower()
+        if role == "seed" and source in {"bundle", "bootstrap_promoted"}:
+            return 0
+        return 1
+
     return sorted(
         candidates,
         key=lambda record: (
             -int(record.last_sync_ok_at or 0),
+            _seed_priority(record),
             int(record.failure_count or 0),
             int(record.added_at or 0),
             record.peer_url,

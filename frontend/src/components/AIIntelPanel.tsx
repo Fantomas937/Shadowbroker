@@ -357,8 +357,15 @@ function ConnectModalBody({ apiEndpoint, handleCopy, copied }: ConnectModalBodyP
   const [riskAccepted, setRiskAccepted] = React.useState(false);
   const [accessTier, setAccessTier] = React.useState<'restricted' | 'full'>('restricted');
   const [connectionMode, setConnectionMode] = React.useState<'local' | 'remote'>('local');
+  // hmacSecret holds the FULL secret once the operator has clicked
+  // Reveal (or after a regenerate). maskedHmacSecret is the safe-to-show
+  // fingerprint returned by GET /api/ai/connect-info and is loaded on
+  // mount. The two are independent state slots so a stale full secret
+  // can never leak back into the UI after a regenerate.
   const [hmacSecret, setHmacSecret] = React.useState('');
+  const [maskedHmacSecret, setMaskedHmacSecret] = React.useState('');
   const [hmacLoading, setHmacLoading] = React.useState(false);
+  const [revealing, setRevealing] = React.useState(false);
   const [tierSaving, setTierSaving] = React.useState(false);
   const [showAdvanced, setShowAdvanced] = React.useState(false);
   const [showResetConfirm, setShowResetConfirm] = React.useState(false);
@@ -381,16 +388,40 @@ function ConnectModalBody({ apiEndpoint, handleCopy, copied }: ConnectModalBodyP
   const [torError, setTorError] = React.useState('');
   const [torOnion, setTorOnion] = React.useState('');
 
-  // Fetch connect-info + node status on mount
+  // Issue #302 (tg12): the full HMAC secret no longer travels through
+  // GET /api/ai/connect-info on every modal open. The flow is now:
+  //
+  //   1. GET /api/ai/connect-info — always returns the masked fingerprint
+  //      (first6 + bullets + last4). `hmacSecret` stays empty until the
+  //      operator clicks the Reveal (eye) button below.
+  //   2. POST /api/ai/connect-info/bootstrap — fires once on mount if the
+  //      backend reports `hmac_secret_set: false`. Idempotent and never
+  //      returns the secret in the response.
+  //   3. POST /api/ai/connect-info/reveal — fires when the operator clicks
+  //      Reveal or Copy without the secret yet loaded. Returns the full
+  //      secret with strict `Cache-Control: no-store` so it doesn't land
+  //      in browser caches or HAR exports.
   React.useEffect(() => {
     (async () => {
       try {
         setHmacLoading(true);
-        const res = await fetch(`${API_BASE}/api/ai/connect-info?reveal=true`);
-        if (res.ok) {
-          const data = await res.json();
-          setHmacSecret(data.hmac_secret || '');
-          setAccessTier(data.access_tier === 'full' ? 'full' : 'restricted');
+        const res = await fetch(`${API_BASE}/api/ai/connect-info`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setMaskedHmacSecret(data.masked_hmac_secret || '');
+        setAccessTier(data.access_tier === 'full' ? 'full' : 'restricted');
+
+        // Transparent first-use bootstrap. Mirrors the pre-#302 UX of
+        // "open modal → secret exists" without the GET side-effect.
+        if (!data.hmac_secret_set) {
+          const bootRes = await fetch(
+            `${API_BASE}/api/ai/connect-info/bootstrap`,
+            { method: 'POST' },
+          );
+          if (bootRes.ok) {
+            const bootData = await bootRes.json();
+            setMaskedHmacSecret(bootData.masked_hmac_secret || '');
+          }
         }
       } catch { /* ignore */ }
       finally { setHmacLoading(false); }
@@ -477,8 +508,17 @@ function ConnectModalBody({ apiEndpoint, handleCopy, copied }: ConnectModalBodyP
       const res = await fetch(`${API_BASE}/api/settings/agent/reset-all`, { method: 'POST' });
       const data = await res.json();
       if (data.ok) {
-        // Update local state with new credentials
-        if (data.new_hmac_secret) setHmacSecret(data.new_hmac_secret);
+        // Update local state with new credentials. reset-all returns
+        // the new HMAC secret in-band (same one-time-disclosure rule
+        // as /regenerate — a deliberate destructive action). Refresh
+        // both slots so the masked display stays in sync.
+        if (data.new_hmac_secret) {
+          setHmacSecret(data.new_hmac_secret);
+          const s = String(data.new_hmac_secret);
+          setMaskedHmacSecret(
+            s.length > 10 ? s.slice(0, 6) + '•'.repeat(8) + s.slice(-4) : '•'.repeat(16),
+          );
+        }
         if (data.new_onion) {
           setTorOnion(data.new_onion);
           setRemoteUrl(data.new_onion);
@@ -502,13 +542,41 @@ function ConnectModalBody({ apiEndpoint, handleCopy, copied }: ConnectModalBodyP
     finally { setTierSaving(false); }
   };
 
+  // Issue #302: POST /reveal returns the full secret with strict
+  // no-store headers. Lazily fetched — never on mount. Returns the
+  // secret string so callers can copy it immediately without waiting
+  // for React state propagation.
+  const revealHmacSecret = async (): Promise<string> => {
+    if (hmacSecret) return hmacSecret;
+    setRevealing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/connect-info/reveal`, {
+        method: 'POST',
+      });
+      if (!res.ok) return '';
+      const data = await res.json();
+      const secret = String(data.hmac_secret || '');
+      setHmacSecret(secret);
+      return secret;
+    } catch {
+      return '';
+    } finally {
+      setRevealing(false);
+    }
+  };
+
   const handleRegenerate = async () => {
     setRegenerating(true);
     try {
       const res = await fetch(`${API_BASE}/api/ai/connect-info/regenerate`, { method: 'POST' });
       if (res.ok) {
         const data = await res.json();
+        // Regenerate is a deliberate destructive action — operator needs
+        // to see the new secret once to update their OpenClaw config.
+        // Both the full and masked forms refresh in one shot.
         setHmacSecret(data.hmac_secret || '');
+        setMaskedHmacSecret(data.masked_hmac_secret || '');
+        setShowSecret(true);
       }
     } catch { /* ignore */ }
     finally { setRegenerating(false); }
@@ -543,9 +611,17 @@ function ConnectModalBody({ apiEndpoint, handleCopy, copied }: ConnectModalBodyP
     finally { setNodeToggling(false); }
   };
 
-  const maskedSecret = hmacSecret
-    ? hmacSecret.slice(0, 6) + '\u2022'.repeat(8) + hmacSecret.slice(-4)
-    : '\u2022'.repeat(16);
+  // Issue #302: prefer the server-supplied fingerprint
+  // (maskedHmacSecret) \u2014 it's filled on mount via the (no-secret) GET.
+  // If the operator has clicked Reveal, fall through to deriving the
+  // mask from the in-memory full secret so we keep the same shape
+  // (first6 + bullets + last4) regardless of source. Final fallback
+  // (no secret loaded yet) is a generic bullet string.
+  const maskedSecret =
+    maskedHmacSecret ||
+    (hmacSecret
+      ? hmacSecret.slice(0, 6) + '\u2022'.repeat(8) + hmacSecret.slice(-4)
+      : '\u2022'.repeat(16));
 
   // Resolve the endpoint URL
   const resolvedUrl = connectionMode === 'local'
@@ -672,10 +748,15 @@ function ConnectModalBody({ apiEndpoint, handleCopy, copied }: ConnectModalBodyP
     return lines.join('\n');
   };
   const displaySnippet = buildSnippet(maskedSecret);
-  const copySnippet = buildSnippet(hmacSecret);
 
-  const handleCopySnippet = () => {
-    navigator.clipboard.writeText(copySnippet);
+  // Issue #302: the copy snippet needs the FULL secret. Pre-#302 we kept
+  // it in memory from the GET-with-reveal load; now we lazy-fetch via
+  // POST /reveal only when the operator actually clicks Copy. If they
+  // already revealed, the in-memory value is reused (no extra request).
+  const handleCopySnippet = async () => {
+    const secret = hmacSecret || (await revealHmacSecret());
+    if (!secret) return;
+    navigator.clipboard.writeText(buildSnippet(secret));
     setSnippetCopied(true);
     setTimeout(() => setSnippetCopied(false), 2000);
   };
@@ -913,18 +994,38 @@ function ConnectModalBody({ apiEndpoint, handleCopy, copied }: ConnectModalBodyP
                   </div>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 bg-black/60 border border-violet-800/40 px-3 py-2 text-xs font-mono text-violet-300 overflow-hidden text-ellipsis">
-                      {showSecret ? hmacSecret : maskedSecret}
+                      {/* Issue #302: when the operator hasn't clicked
+                          Reveal yet, hmacSecret is empty and we fall
+                          back to maskedHmacSecret (the safe fingerprint
+                          returned by GET /api/ai/connect-info). */}
+                      {showSecret && hmacSecret ? hmacSecret : (maskedHmacSecret || maskedSecret)}
                     </code>
                     <button
-                      onClick={() => setShowSecret(!showSecret)}
-                      className="p-2 bg-violet-600/20 border border-violet-500/40 text-violet-400 hover:bg-violet-600/40 transition-colors shrink-0"
+                      onClick={async () => {
+                        if (showSecret) {
+                          setShowSecret(false);
+                          return;
+                        }
+                        // Need the full secret in state before showing it.
+                        const secret = await revealHmacSecret();
+                        if (secret) setShowSecret(true);
+                      }}
+                      disabled={revealing}
+                      className="p-2 bg-violet-600/20 border border-violet-500/40 text-violet-400 hover:bg-violet-600/40 transition-colors shrink-0 disabled:opacity-50"
                       title={showSecret ? 'Hide' : 'Reveal'}
                     >
                       {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
                     </button>
                     <button
-                      onClick={() => handleCopy(hmacSecret)}
-                      className="p-2 bg-violet-600/20 border border-violet-500/40 text-violet-400 hover:bg-violet-600/40 transition-colors shrink-0"
+                      onClick={async () => {
+                        // Copy needs the full secret. Fetch it lazily if
+                        // the operator hasn't clicked Reveal yet — no
+                        // point making them reveal first just to copy.
+                        const secret = hmacSecret || (await revealHmacSecret());
+                        if (secret) handleCopy(secret);
+                      }}
+                      disabled={revealing}
+                      className="p-2 bg-violet-600/20 border border-violet-500/40 text-violet-400 hover:bg-violet-600/40 transition-colors shrink-0 disabled:opacity-50"
                       title="Copy key"
                     >
                       {copied ? <Check size={14} /> : <Copy size={14} />}

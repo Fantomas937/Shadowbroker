@@ -2521,45 +2521,85 @@ async def api_capabilities(request: Request):
 # OpenClaw Connection Management (local-operator only — NOT via HMAC)
 # These endpoints manage the HMAC secret itself, so they MUST require
 # local operator access to prevent privilege escalation.
+#
+# Issue #302 (tg12): pre-fix, GET /api/ai/connect-info had two problems:
+#
+#   1. ``?reveal=true`` made the full secret travel through every operator
+#      page-load that opened the Connect modal. Even gated to
+#      ``require_local_operator``, that put the secret into browser
+#      history, dev-tools network panels, browser disk caches, HAR
+#      exports, and screen captures. Every time the modal opened.
+#
+#   2. The same GET endpoint auto-bootstrapped (generated + persisted)
+#      the secret on first read. Side effects on a GET are a footgun:
+#      browser prefetchers, mirror tools, and casual curl-from-history
+#      would all silently mint+persist a fresh secret. (Gated, but
+#      still surprising — and noisy in the audit log.)
+#
+# Resolution:
+#
+#   GET  /api/ai/connect-info             — always returns the MASKED
+#                                            secret. No ?reveal param.
+#                                            No auto-bootstrap; if the
+#                                            secret is missing,
+#                                            ``hmac_secret_set: false``
+#                                            tells the frontend to call
+#                                            /bootstrap.
+#
+#   POST /api/ai/connect-info/bootstrap   — NEW. Generates + persists the
+#                                            secret if missing. Idempotent.
+#                                            Returns metadata only, never
+#                                            the full secret.
+#
+#   POST /api/ai/connect-info/reveal      — NEW. Returns the full secret in
+#                                            the body with strict
+#                                            ``Cache-Control: no-store,
+#                                            no-cache, must-revalidate``
+#                                            + ``Pragma: no-cache`` so
+#                                            it does not land in browser
+#                                            caches. POST means it does
+#                                            not land in URL history.
+#
+#   POST /api/ai/connect-info/regenerate  — keeps existing one-time-reveal
+#                                            behavior (regenerate IS a
+#                                            deliberate destructive action
+#                                            the operator triggered, so
+#                                            displaying the new secret
+#                                            once is the only path that
+#                                            makes the operation useful).
+#                                            Same no-store headers added.
 # ---------------------------------------------------------------------------
 
-@router.get("/api/ai/connect-info", dependencies=[Depends(require_local_operator)])
-@limiter.limit("30/minute")
-async def get_connect_info(request: Request, reveal: bool = False):
-    """Return connection details for the OpenClaw Connect modal.
+# Cache-Control headers that should accompany every response carrying the
+# full HMAC secret. Reused across the reveal + regenerate endpoints so a
+# future refactor that splits or renames them can't forget the headers.
+_NO_STORE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, private",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
-    The HMAC secret is masked by default. Pass ?reveal=true to see the full key.
-    Private keys are NEVER returned.
+
+def _mask_hmac_secret(secret: str) -> str:
+    """Return a fingerprint-style mask (first6 + bullets + last4) suitable
+    for display in the UI before the operator clicks Reveal."""
+    if not secret:
+        return ""
+    if len(secret) > 10:
+        return secret[:6] + "••••••••" + secret[-4:]
+    return "••••••••"
+
+
+def _connect_info_metadata(settings) -> dict:
+    """Return everything the Connect modal needs EXCEPT the secret itself.
+
+    Shared between GET /api/ai/connect-info (where the full secret is
+    masked) and POST /api/ai/connect-info/bootstrap (where the operator
+    just generated a secret but we don't return it inline — they have to
+    call /reveal to see it).
     """
-    import os
-    import secrets
-    from services.config import get_settings
-
-    settings = get_settings()
-    hmac_secret = str(settings.OPENCLAW_HMAC_SECRET or "").strip()
     access_tier = str(settings.OPENCLAW_ACCESS_TIER or "restricted").strip().lower()
-
-    # Auto-generate if not set
-    if not hmac_secret:
-        hmac_secret = secrets.token_hex(24)  # 48 chars
-        _write_env_value("OPENCLAW_HMAC_SECRET", hmac_secret)
-        # Clear settings cache so next read picks up the new value
-        get_settings.cache_clear()
-
-    masked = hmac_secret[:6] + "••••••••" + hmac_secret[-4:] if len(hmac_secret) > 10 else "••••••••"
-
     return {
-        "ok": True,
-        "hmac_secret": hmac_secret if reveal else masked,
-        "hmac_secret_set": bool(hmac_secret),
-        "bootstrap_behavior": {
-            "auto_generates_when_missing": True,
-            "auto_generated_this_call": not bool(settings.OPENCLAW_HMAC_SECRET or ""),
-            "notes": [
-                "If no HMAC secret exists yet, this endpoint bootstraps one and persists it to .env.",
-                "Regenerating the HMAC secret revokes all existing direct-mode OpenClaw callers at once.",
-            ],
-        },
         "access_tier": access_tier,
         "trust_model": {
             "remote_http_principal": "holder_of_openclaw_hmac_secret",
@@ -2613,12 +2653,63 @@ async def get_connect_info(request: Request, reveal: bool = False):
     }
 
 
-@router.post("/api/ai/connect-info/regenerate", dependencies=[Depends(require_local_operator)])
-@limiter.limit("5/minute")
-async def regenerate_hmac_secret(request: Request):
-    """Generate a new HMAC secret. Old secret immediately stops working."""
+@router.get("/api/ai/connect-info", dependencies=[Depends(require_local_operator)])
+@limiter.limit("30/minute")
+async def get_connect_info(request: Request):
+    """Return connection details for the OpenClaw Connect modal.
+
+    The HMAC secret is always returned as a fingerprint mask
+    (``first6 + bullets + last4``); the full value is only ever served by
+    ``POST /api/ai/connect-info/reveal`` (see #302). When the secret has
+    not been bootstrapped yet, ``hmac_secret_set`` is false and the
+    frontend should call ``POST /api/ai/connect-info/bootstrap``.
+
+    Private keys are NEVER returned.
+    """
+    from services.config import get_settings
+
+    settings = get_settings()
+    hmac_secret = str(settings.OPENCLAW_HMAC_SECRET or "").strip()
+
+    return {
+        "ok": True,
+        "masked_hmac_secret": _mask_hmac_secret(hmac_secret),
+        "hmac_secret_set": bool(hmac_secret),
+        "bootstrap_behavior": {
+            "auto_generates_when_missing": False,
+            "notes": [
+                "Call POST /api/ai/connect-info/bootstrap to mint a secret on first use.",
+                "Call POST /api/ai/connect-info/reveal to see the full secret (no-store).",
+                "Regenerating the HMAC secret revokes all existing direct-mode OpenClaw callers at once.",
+            ],
+        },
+        **_connect_info_metadata(settings),
+    }
+
+
+@router.post("/api/ai/connect-info/bootstrap", dependencies=[Depends(require_local_operator)])
+@limiter.limit("10/minute")
+async def bootstrap_hmac_secret(request: Request):
+    """Mint and persist the OpenClaw HMAC secret if it isn't already set.
+
+    Idempotent: if a secret already exists, returns ``generated: false``
+    and leaves the existing secret untouched. Never returns the secret
+    value in the response body — the operator calls
+    ``POST /api/ai/connect-info/reveal`` to see it.
+    """
     import secrets
     from services.config import get_settings
+
+    settings = get_settings()
+    existing = str(settings.OPENCLAW_HMAC_SECRET or "").strip()
+    if existing:
+        return {
+            "ok": True,
+            "generated": False,
+            "hmac_secret_set": True,
+            "masked_hmac_secret": _mask_hmac_secret(existing),
+            "detail": "HMAC secret already configured. Use /reveal to see it.",
+        }
 
     new_secret = secrets.token_hex(24)  # 48 chars
     _write_env_value("OPENCLAW_HMAC_SECRET", new_secret)
@@ -2626,9 +2717,72 @@ async def regenerate_hmac_secret(request: Request):
 
     return {
         "ok": True,
-        "hmac_secret": new_secret,
-        "detail": "HMAC secret regenerated. Update your OpenClaw agent configuration.",
+        "generated": True,
+        "hmac_secret_set": True,
+        "masked_hmac_secret": _mask_hmac_secret(new_secret),
+        "detail": "HMAC secret generated. Call /reveal to copy it into your OpenClaw config.",
     }
+
+
+@router.post("/api/ai/connect-info/reveal", dependencies=[Depends(require_local_operator)])
+@limiter.limit("10/minute")
+async def reveal_hmac_secret(request: Request):
+    """Return the full HMAC secret in the response body.
+
+    POST (not GET) so the secret never lands in URL history, access logs,
+    or browser visit history. Strict ``Cache-Control: no-store`` headers
+    prevent intermediaries from persisting the response. Returns 404 if
+    no secret has been bootstrapped — the frontend should call
+    ``POST /api/ai/connect-info/bootstrap`` first.
+    """
+    from services.config import get_settings
+
+    settings = get_settings()
+    hmac_secret = str(settings.OPENCLAW_HMAC_SECRET or "").strip()
+    if not hmac_secret:
+        raise HTTPException(
+            404,
+            "No HMAC secret configured. Call POST /api/ai/connect-info/bootstrap first.",
+        )
+    return JSONResponse(
+        content={
+            "ok": True,
+            "hmac_secret": hmac_secret,
+            "masked_hmac_secret": _mask_hmac_secret(hmac_secret),
+        },
+        headers=_NO_STORE_HEADERS,
+    )
+
+
+@router.post("/api/ai/connect-info/regenerate", dependencies=[Depends(require_local_operator)])
+@limiter.limit("5/minute")
+async def regenerate_hmac_secret(request: Request):
+    """Generate a new HMAC secret. Old secret immediately stops working.
+
+    Returns the new secret in the response body — this is the only
+    operation where the full secret travels back through the response,
+    because regenerating IS a deliberate destructive action the operator
+    triggered and they need to see the new value once to update their
+    OpenClaw configuration. Strict ``Cache-Control: no-store`` headers
+    keep it from being persisted by browser caches, proxies, or HAR
+    capture tooling.
+    """
+    import secrets
+    from services.config import get_settings
+
+    new_secret = secrets.token_hex(24)  # 48 chars
+    _write_env_value("OPENCLAW_HMAC_SECRET", new_secret)
+    get_settings.cache_clear()
+
+    return JSONResponse(
+        content={
+            "ok": True,
+            "hmac_secret": new_secret,
+            "masked_hmac_secret": _mask_hmac_secret(new_secret),
+            "detail": "HMAC secret regenerated. Update your OpenClaw agent configuration.",
+        },
+        headers=_NO_STORE_HEADERS,
+    )
 
 
 @router.put("/api/ai/connect-info/access-tier", dependencies=[Depends(require_local_operator)])

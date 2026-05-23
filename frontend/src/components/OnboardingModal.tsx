@@ -140,17 +140,51 @@ const OnboardingModal = React.memo(function OnboardingModal({
   ].join('\n');
   const remoteAgentNeedsTor = agentMode === 'remote' && !torAddress;
 
+  // Issue #302 (tg12): the full HMAC secret no longer comes back from
+  // GET /api/ai/connect-info. We fetch metadata + the masked fingerprint
+  // first; if the operator has explicitly asked to see the key (the
+  // ``reveal`` flag), we follow up with POST /api/ai/connect-info/reveal
+  // (after a transparent POST /bootstrap if the secret hasn't been
+  // minted yet) which carries the secret with strict no-store headers.
   const fetchAgentConnectInfo = async (reveal = true) => {
     setAgentLoading(true);
     setAgentMsg(null);
     try {
-      const res = await fetch(`/api/ai/connect-info?reveal=${reveal ? 'true' : 'false'}`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.ok === false) {
-        throw new Error(data?.detail || 'Could not prepare agent credentials.');
+      // 1) GET metadata + masked fingerprint.
+      const metaRes = await fetch('/api/ai/connect-info');
+      const metaData = await metaRes.json().catch(() => ({}));
+      if (!metaRes.ok || metaData?.ok === false) {
+        throw new Error(metaData?.detail || 'Could not prepare agent credentials.');
       }
-      setAgentSecret(data.hmac_secret || '');
-      setAgentTier(data.access_tier === 'full' ? 'full' : 'restricted');
+      setAgentTier(metaData.access_tier === 'full' ? 'full' : 'restricted');
+
+      // 2) Mint the secret if it isn't set yet — transparent, idempotent.
+      let secretSet = !!metaData.hmac_secret_set;
+      if (!secretSet) {
+        const bootRes = await fetch('/api/ai/connect-info/bootstrap', {
+          method: 'POST',
+        });
+        const bootData = await bootRes.json().catch(() => ({}));
+        if (!bootRes.ok || bootData?.ok === false) {
+          throw new Error(bootData?.detail || 'Could not generate agent credentials.');
+        }
+        secretSet = !!bootData.hmac_secret_set;
+      }
+
+      // 3) If the caller asked to see the secret, fetch it explicitly.
+      //    Otherwise the masked fingerprint is enough for the UI.
+      if (reveal && secretSet) {
+        const revealRes = await fetch('/api/ai/connect-info/reveal', {
+          method: 'POST',
+        });
+        const revealData = await revealRes.json().catch(() => ({}));
+        if (!revealRes.ok || revealData?.ok === false) {
+          throw new Error(revealData?.detail || 'Could not reveal agent credentials.');
+        }
+        setAgentSecret(revealData.hmac_secret || '');
+      } else {
+        setAgentSecret(metaData.masked_hmac_secret || '');
+      }
       setAgentMsg({ type: 'ok', text: 'Agent key is ready. Copy it into your local or remote agent runtime.' });
     } catch (error) {
       setAgentMsg({

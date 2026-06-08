@@ -42,7 +42,7 @@ def current_release_profile(settings: Any | None = None) -> str:
 def _release_attestation_configured(settings: Any) -> bool:
     explicit_raw = str(getattr(settings, "MESH_RELEASE_ATTESTATION_PATH", "") or "").strip()
     if explicit_raw:
-        return Path(explicit_raw).exists() or True
+        return Path(explicit_raw).exists()
     default_path = Path(__file__).resolve().parents[1] / "data" / "release_attestation.json"
     return default_path.exists()
 

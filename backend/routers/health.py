@@ -8,7 +8,7 @@ from services.data_fetcher import get_latest_data
 from services.schemas import HealthResponse
 import os
 
-APP_VERSION = os.environ.get("_HEALTH_APP_VERSION", "0.9.81")
+APP_VERSION = os.environ.get("_HEALTH_APP_VERSION", "0.9.82")
 
 router = APIRouter()
 

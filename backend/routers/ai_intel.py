@@ -1590,7 +1590,7 @@ async def agent_tool_manifest(request: Request):
 
     return {
         "ok": True,
-        "version": "0.9.81",
+        "version": "0.9.82",
         "access_tier": access_tier,
         "available_commands": available_commands,
         "transport": {
@@ -1705,11 +1705,12 @@ async def agent_tool_manifest(request: Request):
             {
                 "name": "search_news",
                 "type": "read",
-                "description": "Search news and event layers server-side by keyword. Includes news, GDELT, CrowdThreat, and major incident/event feeds without pulling the full slow telemetry feed.",
+                "description": "Search news and event layers server-side by keyword. Includes news, GDELT, CrowdThreat, Telegram OSINT, and major incident/event feeds without pulling the full slow telemetry feed.",
                 "parameters": {
                     "query": {"type": "string", "required": True, "description": "Keyword or phrase to search for"},
                     "limit": {"type": "integer", "required": False, "description": "Max results (default 10, max 50)"},
                     "include_gdelt": {"type": "boolean", "required": False, "description": "Include GDELT matches (default true)"},
+                    "include_telegram": {"type": "boolean", "required": False, "description": "Include Telegram OSINT channel posts (default true)"},
                     "compact": {"type": "boolean", "required": False, "description": "If true, strips empty/None fields from each result and rounds lat/lng to 3 decimals. Response includes format: 'compressed_v1'."},
                 },
                 "returns": "{results: [{source_layer, title, summary, source, link, lat, lng, risk_score}], version: int, truncated: bool}",
@@ -1742,6 +1743,55 @@ async def agent_tool_manifest(request: Request):
                     "context_limit": {"type": "integer", "required": False, "description": "Max records from each context layer (default 10)"},
                 },
                 "returns": "{center, radius_km, nearby, topic_news, context_layers}",
+            },
+            {
+                "name": "osint_lookup",
+                "type": "read",
+                "description": "Run a passive OSINT recon lookup server-side (same backends as the Recon panel). SSRF-guarded outbound proxies for IP geolocation, DNS, WHOIS, certs, BGP/ASN, sanctions, CVE, MAC vendor, GitHub profile, breach checks, and threat feeds.",
+                "parameters": {
+                    "tool": {"type": "string", "required": True, "description": "Lookup type: ip, dns, whois, certs, threats, bgp, sanctions, cve, mac, github, leaks, sweep_init"},
+                    "ip": {"type": "string", "required": False, "description": "IPv4/IPv6 for ip or sweep_init"},
+                    "domain": {"type": "string", "required": False, "description": "Domain for dns, whois, certs"},
+                    "query": {"type": "string", "required": False, "description": "Generic query (BGP ASN, sanctions name, optional threats filter)"},
+                    "cve": {"type": "string", "required": False, "description": "CVE id for cve lookup"},
+                    "mac": {"type": "string", "required": False, "description": "MAC address for mac lookup"},
+                    "username": {"type": "string", "required": False, "description": "GitHub username"},
+                    "email": {"type": "string", "required": False, "description": "Email for breach/leak lookup"},
+                    "schema": {"type": "string", "required": False, "description": "Sanctions schema filter: Person, Organization, Company, Vessel, Airplane, LegalEntity"},
+                    "limit": {"type": "integer", "required": False, "description": "Sanctions result cap (default 25, max 100)"},
+                    "cidr": {"type": "integer", "required": False, "description": "CIDR mask for sweep_init (24-32, default 24)"},
+                },
+                "returns": "Tool-specific JSON (geo, DNS records, WHOIS, sanctions hits, CVE details, etc.)",
+            },
+            {
+                "name": "osint_tools",
+                "type": "read",
+                "description": "List available OSINT recon tools, entity-expand types, and sanctions schemas.",
+                "parameters": {},
+                "returns": "{tools: [...], entity_types: [...], sanctions_schemas: [...], notes: {...}}",
+            },
+            {
+                "name": "entity_expand",
+                "type": "read",
+                "description": "Expand an entity relationship graph around an aircraft, vessel, IP, company, person, or country. Same backend as /api/entity/expand.",
+                "parameters": {
+                    "type": {"type": "string", "required": True, "description": "Entity type: aircraft, vessel, company, person, ip, country"},
+                    "id": {"type": "string", "required": True, "description": "Entity identifier (tail number, MMSI, IP, company name, etc.)"},
+                    "registration": {"type": "string", "required": False, "description": "Aircraft registration hint"},
+                    "model": {"type": "string", "required": False, "description": "Aircraft model hint"},
+                    "icao24": {"type": "string", "required": False, "description": "ICAO24 hex for aircraft"},
+                },
+                "returns": "{nodes: [...], links: [...]}",
+            },
+            {
+                "name": "osint_sweep",
+                "type": "write",
+                "description": "Active subnet device discovery via Shodan InternetDB (ports, vulns, hostnames). Requires full OpenClaw access tier. Private/reserved IPs blocked.",
+                "parameters": {
+                    "ip": {"type": "string", "required": True, "description": "Public IPv4 anchor for the sweep"},
+                    "cidr": {"type": "integer", "required": False, "description": "Subnet size /24-/32 (default 24)"},
+                },
+                "returns": "{center, target_ip, cidr, subnet, devices, summary, sweep_time_ms}",
             },
             {
                 "name": "what_changed",
@@ -2194,6 +2244,11 @@ async def agent_tool_manifest(request: Request):
             "Prefer compact lookups first: search_telemetry, find_flights, find_ships, search_news, entities_near, get_layer_slice. Use get_telemetry/get_slow_telemetry/get_report only when focused commands are insufficient.",
             "ShadowBroker does expose UAP sightings, wastewater, and tracked_flights/VIP aircraft when those layers are populated. Verify with get_summary or get_layer_slice before claiming a layer is absent.",
             "ShadowBroker also exposes fishing_activity, which is the fishing-vessel activity layer backed by Global Fishing Watch data when GFW_API_TOKEN is configured. Do not confuse it with the AIS ships layer.",
+            "telegram_osint, malware_threats, cyber_threats, and scm_suppliers are live map layers. Use get_summary or get_layer_slice(['telegram_osint']) before claiming they are absent. Aliases: telegram, malware/botnet, cyber/cisa/kev, scm/suppliers.",
+            "search_telemetry and search_news both index Telegram OSINT posts. For malware C2, botnet IPs, CISA KEV CVEs, or semiconductor suppliers, use search_telemetry or get_layer_slice on the matching layer.",
+            "The Recon toolkit is available via osint_lookup: IP geolocation, DNS, WHOIS, certs, BGP, sanctions, CVE, MAC vendor, GitHub, breach checks, threat feeds. Call osint_tools first to list supported tools.",
+            "entity_expand builds relationship graphs for aircraft, vessels, IPs, companies, people, and countries — use after resolving an entity from telemetry or osint_lookup.",
+            "osint_sweep runs active subnet discovery (Shodan InternetDB) and requires full OpenClaw access tier. Use osint_lookup tool=sweep_init for passive geolocation context only.",
             "Use search_telemetry as the Google-style entry point whenever the user gives you a person, place, company, topic, owner, nickname, or natural-language phrase and you do not already know the source layer.",
             "Example: for 'Where is Jerry Jones yacht?' search 'Jerry Jones' across all telemetry first, identify the ship match, then refine with find_ships or raw layer context only if needed.",
             "For fuzzy natural-language lookups like 'Patriots jet' or 'Jerry Jones yacht', use search_telemetry first and inspect the ranked candidate list before making a hard claim.",
@@ -2221,12 +2276,14 @@ async def agent_tool_manifest(request: Request):
 async def api_capabilities(request: Request):
     """Return full API manifest so the agent knows every available endpoint."""
     from services.openclaw_channel import READ_COMMANDS, WRITE_COMMANDS, detect_tier
+    from services.openclaw_routing import routing_manifest
     from services.config import get_settings
     tier = detect_tier()
     access_tier = str(get_settings().OPENCLAW_ACCESS_TIER or "restricted").strip().lower()
     return {
         "ok": True,
-        "version": "0.9.81",
+        "version": "0.9.82",
+        "routing": routing_manifest(),
         "auth": {
             "method": "HMAC-SHA256",
             "headers": ["X-SB-Timestamp", "X-SB-Nonce", "X-SB-Signature"],
@@ -2342,8 +2399,16 @@ async def api_capabilities(request: Request):
                     "description": "Compact server-side ship search by MMSI/IMO/name/query, including yacht-owner enrichment.",
                 },
                 "find_entity": {
-                    "args": {"query": "str (optional)", "entity_type": "aircraft|ship|person|event|infrastructure (optional)", "callsign": "str (optional)", "registration": "str (optional)", "icao24": "str (optional)", "mmsi": "str (optional)", "imo": "str (optional)", "name": "str (optional)", "owner": "str (optional)", "layers": "list[str] (optional)", "limit": "int (default 10)"},
-                    "description": "Exact-first resolver for planes, ships, operators, callsigns, registrations, MMSI/IMO, and named entities. Use before tracking to avoid fuzzy prompt matching.",
+                    "args": {"query": "str (optional)", "entity_type": "aircraft|ship|person|event|infrastructure (optional)", "callsign": "str (optional)", "registration": "str (optional)", "icao24": "str (optional)", "mmsi": "str (optional)", "imo": "str (optional)", "name": "str (optional)", "owner": "str (optional)", "layers": "list[str] (optional)", "limit": "int (default 10)", "fallback_search": "bool (default false)", "confirm_fuzzy": "bool (alias for fallback_search)"},
+                    "description": "Exact-first resolver for planes, ships, operators, callsigns, registrations, MMSI/IMO, and named entities. Skips fuzzy search unless fallback_search=true or no exact match.",
+                },
+                "route_query": {
+                    "args": {"text": "str", "lat": "float (optional)", "lng": "float (optional)", "radius_km": "float (default 50)", "compact": "bool (default true)"},
+                    "description": "Deterministic intent router — returns recommended fast command, alternates, and latency estimate. Preferred entry for natural-language reads.",
+                },
+                "run_playbook": {
+                    "args": {"name": "str", "query": "str (optional)", "lat": "float (optional)", "lng": "float (optional)"},
+                    "description": "Execute a named batch plan (hot_snapshot, morning_brief, monitor_heartbeat, track_snapshot, area_brief, entity_recon).",
                 },
                 "correlate_entity": {
                     "args": {"query": "str (optional)", "entity_type": "str (optional)", "callsign": "str (optional)", "registration": "str (optional)", "icao24": "str (optional)", "mmsi": "str (optional)", "imo": "str (optional)", "name": "str (optional)", "owner": "str (optional)", "radius_km": "float (default 100)", "limit": "int (default 10)"},
@@ -2354,12 +2419,28 @@ async def api_capabilities(request: Request):
                     "description": "Universal compact search across telemetry when the entity type or source layer is not obvious.",
                 },
                 "search_news": {
-                    "args": {"query": "str", "limit": "int (default 10)", "include_gdelt": "bool (default true)"},
-                    "description": "Search news and event layers by keyword without pulling the whole slow feed.",
+                    "args": {"query": "str", "limit": "int (default 10)", "include_gdelt": "bool (default true)", "include_telegram": "bool (default true)"},
+                    "description": "Search news and event layers by keyword without pulling the whole slow feed. Includes Telegram OSINT when include_telegram is true.",
                 },
                 "entities_near": {
                     "args": {"lat": "float", "lng": "float", "radius_km": "float (default 50)", "entity_types": "list[str] (optional)", "limit": "int (default 25)"},
                     "description": "Compact proximity search around a point across selected layers.",
+                },
+                "osint_lookup": {
+                    "args": {"tool": "str (ip|dns|whois|certs|threats|bgp|sanctions|cve|mac|github|leaks|sweep_init)", "...": "tool-specific params"},
+                    "description": "Passive OSINT recon lookup — same backends as the Recon panel.",
+                },
+                "osint_tools": {
+                    "args": {},
+                    "description": "List available recon tools and entity-expand types.",
+                },
+                "entity_expand": {
+                    "args": {"type": "str", "id": "str", "registration": "str (optional)", "icao24": "str (optional)"},
+                    "description": "Entity relationship graph expansion.",
+                },
+                "osint_sweep": {
+                    "args": {"ip": "str", "cidr": "int (default 24)"},
+                    "description": "Active subnet scan — requires full access tier.",
                 },
                 "brief_area": {
                     "args": {"lat": "float", "lng": "float", "radius_km": "float (default 50)", "entity_types": "list[str] (optional)", "query": "str (optional)", "limit": "int (default 25)", "context_limit": "int (default 10)"},
@@ -2507,7 +2588,8 @@ async def api_capabilities(request: Request):
                           "layers are serialized, unchanged layers transfer zero bytes. The client tracks versions "
                           "automatically from SSE events and previous responses. "
                           "3) Pass compact=true on every read command for compressed_v1 responses (~60-90% smaller). "
-                          "4) Use targeted commands first (find_flights, search_telemetry, entities_near). "
+                          "4) Use route_query / find_entity / run_playbook before search_telemetry. "
+                          "Expensive commands require confirm_expensive=true. "
                           "Reserve get_telemetry/get_slow_telemetry for rare full-context pulls.",
             "pins": "Pins are server-side, NOT localStorage. Use place_pin command or POST /api/ai/pins. The agent can place and delete pins.",
             "tracking": "To track a specific aircraft without polling: use add_watch with track_callsign or track_registration. Over SSE, you'll get instant push alerts.",

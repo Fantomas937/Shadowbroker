@@ -934,6 +934,77 @@ export interface DashboardData {
       error?: string | null;
     }>;
   };
+
+  malware_threats?: {
+    threats?: MalwareThreat[];
+    total?: number;
+    timestamp?: string | null;
+    source?: string;
+  };
+  cyber_threats?: {
+    threats?: Array<{
+      id: string;
+      name: string;
+      vendor?: string;
+      product?: string;
+      severity?: string;
+      date?: string;
+      source?: string;
+    }>;
+    stats?: Record<string, unknown>;
+  };
+  scm_suppliers?: {
+    suppliers?: ScmSupplier[];
+    critical_count?: number;
+    total?: number;
+    timestamp?: string;
+  };
+  telegram_osint?: {
+    posts?: TelegramOsintPost[];
+    total?: number;
+    geolocated?: number;
+    timestamp?: string | null;
+    channels?: string[];
+  };
+}
+
+export interface TelegramOsintPost {
+  id: string;
+  title?: string;
+  description?: string;
+  link?: string;
+  published?: string;
+  source?: string;
+  channel?: string;
+  risk_score?: number;
+  coords?: [number, number] | null;
+  media_type?: 'video' | 'photo' | null;
+  media_url?: string | null;
+  embed_url?: string | null;
+}
+
+export interface MalwareThreat {
+  id: string;
+  lat: number;
+  lng: number;
+  ip: string;
+  port?: number;
+  malware: string;
+  status?: string;
+  country?: string;
+  threat_type?: string;
+}
+
+export interface ScmSupplier {
+  id: string;
+  name: string;
+  city: string;
+  country: string;
+  category: string;
+  lat: number;
+  lng: number;
+  risk_level: string;
+  active_threats: string[];
 }
 
 // ─── SAR ─────────────────────────────────────────────────────────────────────
@@ -1044,6 +1115,11 @@ export interface ActiveLayers {
   crowdthreat: boolean;
   sar: boolean;
   road_corridor_trends: boolean;
+  malware_c2: boolean;
+  submarine_cables: boolean;
+  scm_suppliers: boolean;
+  cyber_threats: boolean;
+  telegram_osint: boolean;
 }
 
 export interface SelectedEntity {

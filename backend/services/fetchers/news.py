@@ -158,21 +158,26 @@ _KEYWORD_COORDS = {
 _SORTED_KEYWORDS = sorted(_KEYWORD_COORDS.items(), key=lambda x: len(x[0]), reverse=True)
 
 
+def resolve_coords_match(text: str) -> tuple[tuple[float, float], str] | None:
+    """Return ((lat, lng), matched_keyword) for the most specific keyword hit."""
+    padded_text = f" {text} "
+    for kw, coords in _SORTED_KEYWORDS:
+        if kw.startswith(" ") or kw.endswith(" "):
+            if kw in padded_text:
+                return coords, kw
+        elif re.search(r"\b" + re.escape(kw) + r"\b", text):
+            return coords, kw
+    return None
+
+
 def _resolve_coords(text: str) -> tuple[float, float] | None:
     """Return (lat, lng) for the most specific keyword match, or None.
 
     Longer keywords are tried first. Space-padded keywords (" us ", " uk ")
     use substring matching on padded text; all others use word-boundary regex.
     """
-    padded_text = f" {text} "
-    for kw, coords in _SORTED_KEYWORDS:
-        if kw.startswith(" ") or kw.endswith(" "):
-            if kw in padded_text:
-                return coords
-        else:
-            if re.search(r'\b' + re.escape(kw) + r'\b', text):
-                return coords
-    return None
+    match = resolve_coords_match(text)
+    return match[0] if match else None
 
 
 @with_retry(max_retries=1, base_delay=2)

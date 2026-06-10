@@ -110,6 +110,11 @@ const FRESHNESS_MAP: Record<string, string> = {
   ai_intel: '',
   crowdthreat: 'crowdthreat',
   road_corridor_trends: 'road_corridor_trends',
+  malware_c2: 'malware_threats',
+  submarine_cables: '',
+  scm_suppliers: 'scm_suppliers',
+  cyber_threats: 'cyber_threats',
+  telegram_osint: 'telegram_osint',
 };
 
 // POTUS fleet ICAO hex codes for client-side filtering
@@ -1187,6 +1192,34 @@ const WorldviewLeftPanel = React.memo(function WorldviewLeftPanel({
           count: data?.trains?.length || 0,
           icon: TrainFront,
         },
+        {
+          id: 'submarine_cables',
+          name: t('layers.submarineCables'),
+          source: 'TeleGeography (static)',
+          count: null,
+          icon: Globe,
+        },
+        {
+          id: 'malware_c2',
+          name: t('layers.malwareC2'),
+          source: 'abuse.ch',
+          count: data?.malware_threats?.total || 0,
+          icon: Shield,
+        },
+        {
+          id: 'scm_suppliers',
+          name: t('layers.scmSuppliers'),
+          source: 'Tier 1/2 overlay',
+          count: data?.scm_suppliers?.critical_count || 0,
+          icon: Truck,
+        },
+        {
+          id: 'cyber_threats',
+          name: t('layers.cyberThreats'),
+          source: 'CISA KEV',
+          count: data?.cyber_threats?.threats?.length || 0,
+          icon: AlertTriangle,
+        },
       ],
     },
     {
@@ -1276,6 +1309,13 @@ const WorldviewLeftPanel = React.memo(function WorldviewLeftPanel({
           icon: Activity,
         },
         {
+          id: 'telegram_osint',
+          name: t('layers.telegramOsint'),
+          source: 't.me public channels',
+          count: data?.telegram_osint?.geolocated || 0,
+          icon: Radio,
+        },
+        {
           id: 'crowdthreat',
           name: t('layers.crowdThreat'),
           source: 'CrowdThreat',
@@ -1317,7 +1357,10 @@ const WorldviewLeftPanel = React.memo(function WorldviewLeftPanel({
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     sections.forEach((s) => {
-      initial[s.label] = false;
+      // Keep high-traffic intel overlays visible on first paint (GDELT, Telegram, etc.)
+      initial[s.label] = s.layers.some((l) =>
+        ['global_incidents', 'telegram_osint', 'ukraine_frontline'].includes(l.id),
+      );
     });
     return initial;
   });

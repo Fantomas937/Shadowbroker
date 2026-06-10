@@ -278,6 +278,16 @@ _FISHING_FETCH_INTERVAL_S = 3600  # once per hour — GFW data has ~5 day lag
 _last_fishing_fetch_ts: float = 0.0
 
 
+def _gfw_int_env(name: str, default: int, *, minimum: int = 1, maximum: int | None = None) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        value = default
+    if maximum is not None:
+        value = min(maximum, value)
+    return max(minimum, value)
+
+
 @with_retry(max_retries=1, base_delay=5)
 def fetch_fishing_activity():
     """Fetch recent fishing events from Global Fishing Watch (~5 day lag)."""
@@ -300,10 +310,16 @@ def fetch_fishing_activity():
     try:
         import datetime as _dt
 
+        # GFW publishes with ~5 day lag; windows shorter than ~7 days often return 0 events.
+        lookback_days = _gfw_int_env("GFW_EVENTS_LOOKBACK_DAYS", 7, minimum=1, maximum=14)
+        max_pages = _gfw_int_env("GFW_EVENTS_MAX_PAGES", 10, minimum=1, maximum=100)
+        timeout_s = _gfw_int_env("GFW_EVENTS_TIMEOUT_S", 90, minimum=30, maximum=180)
         _end = _dt.date.today().isoformat()
-        _start = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
-        page_size = max(1, int(os.environ.get("GFW_EVENTS_PAGE_SIZE", "500") or "500"))
+        _start = (_dt.date.today() - _dt.timedelta(days=lookback_days)).isoformat()
+        page_size = _gfw_int_env("GFW_EVENTS_PAGE_SIZE", 500, minimum=1, maximum=1000)
         offset = 0
+        pages_fetched = 0
+        total_available: int | None = None
         seen_offsets: set[int] = set()
         seen_ids: set[str] = set()
         headers = {"Authorization": f"Bearer {token}"}
@@ -324,7 +340,7 @@ def fetch_fishing_activity():
                 }
             )
             url = f"https://gateway.api.globalfishingwatch.org/v3/events?{query}"
-            response = fetch_with_curl(url, timeout=30, headers=headers)
+            response = fetch_with_curl(url, timeout=timeout_s, headers=headers)
             if response.status_code != 200:
                 logger.warning(
                     "Fishing activity fetch failed at offset=%s: HTTP %s",
@@ -334,10 +350,16 @@ def fetch_fishing_activity():
                 break
 
             payload = response.json() or {}
+            if total_available is None:
+                try:
+                    total_available = int(payload.get("total")) if payload.get("total") is not None else None
+                except (TypeError, ValueError):
+                    total_available = None
             entries = payload.get("entries", [])
             if not entries:
                 break
 
+            pages_fetched += 1
             added_this_page = 0
             for e in entries:
                 pos = e.get("position", {})
@@ -370,6 +392,15 @@ def fetch_fishing_activity():
                 added_this_page += 1
 
             if len(entries) < page_size:
+                break
+
+            if pages_fetched >= max_pages:
+                logger.info(
+                    "Fishing activity: capped at %s pages (%s events fetched; GFW total=%s)",
+                    max_pages,
+                    len(events),
+                    total_available if total_available is not None else "unknown",
+                )
                 break
 
             next_offset = payload.get("nextOffset")

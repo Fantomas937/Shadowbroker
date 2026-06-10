@@ -203,7 +203,12 @@
     "aiIntel": "Infos IA",
     "sar": "SAR",
     "roadCorridorTrends": "Tendances fret routier",
-    "roadCorridorSource": "Copernicus S-2 · tendances (pas en direct)"
+    "roadCorridorSource": "Copernicus S-2 · tendances (pas en direct)",
+    "submarineCables": "Câbles sous-marins",
+    "malwareC2": "Malware C2",
+    "scmSuppliers": "Fournisseurs SCM",
+    "cyberThreats": "Cybermenaces",
+    "telegramOsint": "OSINT Telegram"
   },
   "roadCorridor": {
     "analyzeHere": "ANALYSER ICI",
@@ -213,6 +218,15 @@
     "missingCreds": "Ajouter les identifiants Sentinel dans Réglages → Imagerie",
     "panMapFirst": "Déplacez la carte pour choisir une zone",
     "analyzeFailed": "Échec de l'analyse"
+  },
+  "recon": {
+    "title": "Boîte à outils recon",
+    "proxyNote": "Proxy côté serveur · opérateur local uniquement"
+  },
+  "scm": {
+    "title": "Chaîne d'approvisionnement",
+    "allClear": "Aucun risque élevé sur les nœuds Tier 1/2 surveillés.",
+    "layerOff": "Désactivé — activez la couche dans Données pour surveiller les fabs."
   },
   "shodan": {
     "title": "Connecteur Shodan",
@@ -253,5 +267,12 @@
     "vegetation": "Perturbation végétale",
     "damage": "Évaluation des dégâts",
     "coherence": "Changement de cohérence"
+  },
+  "telegram": {
+    "disclaimer": "AVERTISSEMENT : le contenu ci-dessous provient de canaux Telegram publics. Shadowbroker ne l'héberge pas, ne le vérifie pas et ne le cautionne pas. Vous le consultez à vos risques et cela n'a aucun lien avec Shadowbroker.",
+    "loadMedia": "AFFICHER LE MÉDIA (TELEGRAM)",
+    "openOriginal": "OUVRIR SUR TELEGRAM →",
+    "embedTitle": "Intégration Telegram",
+    "postsAtLocation": "{count} posts à cet endroit — faites défiler"
   }
 }

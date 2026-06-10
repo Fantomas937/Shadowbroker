@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Database, Clock, X } from 'lucide-react';
 
-const CURRENT_VERSION = '0.9.81';
+const CURRENT_VERSION = '0.9.82';
 const STORAGE_KEY = `shadowbroker_startup_warmup_notice_v${CURRENT_VERSION}`;
 
 interface StartupWarmupModalProps {

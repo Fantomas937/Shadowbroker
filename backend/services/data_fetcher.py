@@ -101,6 +101,10 @@ from services.fetchers.crowdthreat import fetch_crowdthreat  # noqa: F401
 from services.fetchers.wastewater import fetch_wastewater  # noqa: F401
 from services.fetchers.sar_catalog import fetch_sar_catalog  # noqa: F401
 from services.fetchers.sar_products import fetch_sar_products  # noqa: F401
+from services.fetchers.malware import fetch_malware_threats  # noqa: F401
+from services.fetchers.telegram_osint import fetch_telegram_osint  # noqa: F401
+from services.fetchers.cyber_status import fetch_cyber_threats  # noqa: F401
+from services.scm.suppliers import fetch_scm_suppliers  # noqa: F401
 from services.ais_stream import prune_stale_vessels  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -480,6 +484,9 @@ def update_slow_data():
         fetch_fishing_activity,
         fetch_power_plants,
         fetch_ukraine_air_raid_alerts,
+        fetch_malware_threats,
+        fetch_cyber_threats,
+        fetch_scm_suppliers,
     ]
     _run_tasks("slow-tier", slow_funcs)
     # Run correlation engine after all data is fresh
@@ -523,6 +530,15 @@ def _load_cctv_cache_for_startup() -> None:
         logger.warning("Startup CCTV cache load failed (non-fatal): %s", e)
 
 
+def _load_static_infrastructure_for_startup() -> None:
+    """Disk-backed reference layers — instant, no network."""
+    for func in (fetch_datacenters, fetch_military_bases, fetch_power_plants):
+        try:
+            func()
+        except Exception as e:
+            logger.warning("Startup static infrastructure load failed for %s: %s", func.__name__, e)
+
+
 def _run_delayed_startup_heavy_refresh() -> None:
     if _STARTUP_HEAVY_REFRESH_DELAY_S > 0:
         logger.info(
@@ -535,6 +551,7 @@ def _run_delayed_startup_heavy_refresh() -> None:
         "startup-heavy",
         [
             update_slow_data,
+            fetch_telegram_osint,
             fetch_volcanoes,
             fetch_viirs_change_nodes,
             fetch_unusual_whales,
@@ -573,6 +590,7 @@ def update_all_data(*, startup_mode: bool = False):
     logger.info("Full data update starting (parallel)...")
     # Preload Meshtastic map cache immediately (instant, from disk)
     seed_startup_caches()
+    _load_static_infrastructure_for_startup()
     with _data_lock:
         meshtastic_seeded = bool(latest_data.get("meshtastic_map_nodes"))
     if startup_mode:
@@ -649,22 +667,9 @@ def update_all_data(*, startup_mode: bool = False):
     # (the scheduled job also runs every 10 min for ongoing refresh).
     if startup_mode:
         try:
-            from services.cctv_pipeline import (
-                TFLJamCamIngestor, LTASingaporeIngestor, AustinTXIngestor,
-                NYCDOTIngestor, CaltransIngestor, ColoradoDOTIngestor,
-                WSDOTIngestor, GeorgiaDOTIngestor, IllinoisDOTIngestor,
-                MichiganDOTIngestor, WindyWebcamsIngestor, DGTNationalIngestor,
-                MadridCityIngestor, OSMTrafficCameraIngestor, get_all_cameras,
-            )
-            from services.cctv_pipeline import OSMALPRCameraIngestor
-            _startup_ingestors = [
-                TFLJamCamIngestor(), LTASingaporeIngestor(), AustinTXIngestor(),
-                NYCDOTIngestor(), CaltransIngestor(), ColoradoDOTIngestor(),
-                WSDOTIngestor(), GeorgiaDOTIngestor(), IllinoisDOTIngestor(),
-                MichiganDOTIngestor(), WindyWebcamsIngestor(), DGTNationalIngestor(),
-                MadridCityIngestor(), OSMTrafficCameraIngestor(),
-                OSMALPRCameraIngestor(),
-            ]
+            from services.cctv_pipeline import get_all_cameras, scheduled_cctv_ingestors
+
+            _startup_ingestors = [ing for ing, _name in scheduled_cctv_ingestors()]
             logger.info("Running CCTV ingest at startup (%d ingestors)...", len(_startup_ingestors))
             ingest_futures = {
                 _SHARED_EXECUTOR.submit(ing.ingest): ing.__class__.__name__
@@ -798,6 +803,18 @@ def start_scheduler():
         id="slow_tier",
         max_instances=1,
         misfire_grace_time=120,
+    )
+
+    # Telegram OSINT — hourly t.me/s channel scrape (kept off the 5-minute slow tier).
+    _telegram_interval_m = max(15, int(os.environ.get("TELEGRAM_OSINT_INTERVAL_MINUTES", "60")))
+    _scheduler.add_job(
+        lambda: _run_task_with_health(fetch_telegram_osint, "fetch_telegram_osint"),
+        "interval",
+        minutes=_telegram_interval_m,
+        next_run_time=datetime.utcnow() + timedelta(seconds=45),
+        id="telegram_osint",
+        max_instances=1,
+        misfire_grace_time=600,
     )
 
     # Prediction markets — own jittered cadence (Polymarket/Kalshi clearnet egress).
@@ -938,39 +955,9 @@ def start_scheduler():
 
     # CCTV pipeline refresh — runs all ingestors, then refreshes in-memory data.
     # Delay the first run slightly so startup serves cached/DB-backed data first.
-    from services.cctv_pipeline import (
-        TFLJamCamIngestor,
-        LTASingaporeIngestor,
-        AustinTXIngestor,
-        NYCDOTIngestor,
-        CaltransIngestor,
-        ColoradoDOTIngestor,
-        WSDOTIngestor,
-        GeorgiaDOTIngestor,
-        IllinoisDOTIngestor,
-        MichiganDOTIngestor,
-        WindyWebcamsIngestor,
-        DGTNationalIngestor,
-        MadridCityIngestor,
-        OSMTrafficCameraIngestor,
-    )
+    from services.cctv_pipeline import scheduled_cctv_ingestors
 
-    _cctv_ingestors = [
-        (TFLJamCamIngestor(), "cctv_tfl"),
-        (LTASingaporeIngestor(), "cctv_lta"),
-        (AustinTXIngestor(), "cctv_atx"),
-        (NYCDOTIngestor(), "cctv_nyc"),
-        (CaltransIngestor(), "cctv_caltrans"),
-        (ColoradoDOTIngestor(), "cctv_codot"),
-        (WSDOTIngestor(), "cctv_wsdot"),
-        (GeorgiaDOTIngestor(), "cctv_gdot"),
-        (IllinoisDOTIngestor(), "cctv_idot"),
-        (MichiganDOTIngestor(), "cctv_mdot"),
-        (WindyWebcamsIngestor(), "cctv_windy"),
-        (DGTNationalIngestor(), "cctv_dgt"),
-        (MadridCityIngestor(), "cctv_madrid"),
-        (OSMTrafficCameraIngestor(), "cctv_osm"),
-    ]
+    _cctv_ingestors = scheduled_cctv_ingestors()
 
     def _run_cctv_ingest_cycle():
         from services.fetchers._store import is_any_active

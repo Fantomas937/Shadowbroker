@@ -158,16 +158,25 @@ import {
   UavLabels,
   EarthquakeLabels,
   ThreatMarkers,
+  TelegramOsintMarkers,
 } from '@/components/map/MapMarkers';
 import type { DashboardData, Flight, KiwiSDR, MaplibreViewerProps, Scanner, Ship, SigintSignal } from '@/types/dashboard';
 import { useDataKeys } from '@/hooks/useDataStore';
 import { useInterpolation } from '@/components/map/hooks/useInterpolation';
 import { useClusterLabels } from '@/components/map/hooks/useClusterLabels';
 import { spreadAlertItems } from '@/utils/alertSpread';
+import {
+  applyTelegramAlertAvoidance,
+  telegramClusterKey,
+  telegramClusterNearNewsAlert,
+  telegramMapPinCoords,
+} from '@/components/map/geoJSONBuilders';
 
 import { useViewportBounds } from '@/components/map/hooks/useViewportBounds';
+import { getLiveDataBounds } from '@/lib/liveDataViewport';
 import { MeasurementLayers } from '@/components/map/layers/MeasurementLayers';
 import { buildCctvProxyUrl } from '@/lib/cctvProxy';
+import { sanitizeSubmarineCables } from '@/lib/submarineCables';
 import { CctvFullscreenModal } from '@/components/MaplibreViewer/CctvFullscreenModal';
 import { SatellitePopup } from '@/components/MaplibreViewer/popups/SatellitePopup';
 import { ShipPopup } from '@/components/MaplibreViewer/popups/ShipPopup';
@@ -176,6 +185,7 @@ import { CorrelationPopup } from '@/components/MaplibreViewer/popups/Correlation
 import { WastewaterPopup } from '@/components/MaplibreViewer/popups/WastewaterPopup';
 import { MilitaryBasePopup } from '@/components/MaplibreViewer/popups/MilitaryBasePopup';
 import { RegionDossierPanel } from '@/components/MaplibreViewer/popups/RegionDossierPanel';
+import { TelegramOsintPopup } from '@/components/MaplibreViewer/popups/TelegramOsintPopup';
 import {
   buildSentinelTileUrl,
   hasSentinelCredentials,
@@ -294,6 +304,8 @@ const MAP_EXTRA_DATA_KEYS = [
   'commercial_flights',
   'correlations',
   'crowdthreat',
+  'malware_threats',
+  'telegram_osint',
   'datacenters',
   'firms_fires',
   'fishing_activity',
@@ -1156,6 +1168,30 @@ const MaplibreViewer = ({
   const staticUapSightings = activeLayers.uap_sightings ? data?.uap_sightings : undefined;
   const staticWastewater = activeLayers.wastewater ? data?.wastewater : undefined;
   const staticCrowdthreat = activeLayers.crowdthreat ? data?.crowdthreat : undefined;
+  const staticMalwareThreats = activeLayers.malware_c2 ? data?.malware_threats?.threats : undefined;
+  const staticTelegramOsintPosts = activeLayers.telegram_osint
+    ? data?.telegram_osint?.posts
+    : undefined;
+
+  const [submarineCablesGeoJSON, setSubmarineCablesGeoJSON] = useState<GeoJSON.FeatureCollection | null>(null);
+  useEffect(() => {
+    if (!activeLayers.submarine_cables) {
+      setSubmarineCablesGeoJSON(null);
+      return;
+    }
+    let cancelled = false;
+    fetch('/data/submarine-cables.json')
+      .then((r) => r.json())
+      .then((geo) => {
+        if (!cancelled) setSubmarineCablesGeoJSON(sanitizeSubmarineCables(geo));
+      })
+      .catch(() => {
+        if (!cancelled) setSubmarineCablesGeoJSON(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLayers.submarine_cables]);
 
   const dynamicMapLayers = useDynamicMapLayersWorker(
     {
@@ -1186,6 +1222,7 @@ const MaplibreViewer = ({
     ],
     {
       bounds: mapBounds,
+      serverBboxScoped: getLiveDataBounds() !== null,
       dtSeconds: dtSeconds.current,
       trackedIcaos: Array.from(trackedIcaoSet),
       activeLayers: {
@@ -1247,6 +1284,8 @@ const MaplibreViewer = ({
       uapSightings: staticUapSightings,
       wastewater: staticWastewater,
       crowdthreat: staticCrowdthreat,
+      malwareThreats: staticMalwareThreats,
+      telegramOsintPosts: staticTelegramOsintPosts,
     },
     [
       staticCctv,
@@ -1270,6 +1309,9 @@ const MaplibreViewer = ({
       staticUapSightings,
       staticWastewater,
       staticCrowdthreat,
+      staticMalwareThreats,
+      staticTelegramOsintPosts,
+      mapZoom,
     ],
     {
       bounds: mapBounds,
@@ -1293,6 +1335,8 @@ const MaplibreViewer = ({
         uap_sightings: activeLayers.uap_sightings,
         wastewater: activeLayers.wastewater,
         crowdthreat: activeLayers.crowdthreat,
+        malware_c2: activeLayers.malware_c2,
+        telegram_osint: activeLayers.telegram_osint,
       },
     },
     [
@@ -1316,6 +1360,8 @@ const MaplibreViewer = ({
       activeLayers.uap_sightings,
       activeLayers.wastewater,
       activeLayers.crowdthreat,
+      activeLayers.malware_c2,
+      activeLayers.telegram_osint,
     ],
   );
 
@@ -1351,7 +1397,14 @@ const MaplibreViewer = ({
     uapSightingsGeoJSON,
     wastewaterGeoJSON,
     crowdthreatGeoJSON,
+    malwareGeoJSON,
+    telegramOsintGeoJSON,
   } = staticMapLayers;
+
+  const telegramOsintGeoJSONPlaced = useMemo(
+    () => applyTelegramAlertAvoidance(telegramOsintGeoJSON, data?.news),
+    [telegramOsintGeoJSON, data?.news],
+  );
 
   // Extract cluster label positions via shared hook
   const shipClusters = useClusterLabels(mapRef, 'ships-clusters-layer', shipsGeoJSON);
@@ -1659,6 +1712,9 @@ const MaplibreViewer = ({
     wastewaterGeoJSON && 'wastewater-dot',
     wastewaterGeoJSON && 'wastewater-layer',
     crowdthreatGeoJSON && 'crowdthreat-layer',
+    malwareGeoJSON && 'malware-clusters',
+    malwareGeoJSON && 'malware-layer',
+    submarineCablesGeoJSON && 'submarine-cables-layer',
     sarAnomaliesGeoJSON && 'sar-anomalies-layer',
     sarAoisGeoJSON && 'sar-aois-fill',
     aiIntelGeoJSON && 'ai-intel-clusters',
@@ -1731,6 +1787,9 @@ const MaplibreViewer = ({
   useImperativeSource(mapForHook, 'uap-sightings-source', uapSightingsGeoJSON, 100);
   useImperativeSource(mapForHook, 'wastewater-source', wastewaterGeoJSON, 100);
   useImperativeSource(mapForHook, 'crowdthreat-source', crowdthreatGeoJSON, 100);
+  useImperativeSource(mapForHook, 'malware-source', malwareGeoJSON, 100);
+  useImperativeSource(mapForHook, 'telegram-osint-source', telegramOsintGeoJSONPlaced, 100);
+  useImperativeSource(mapForHook, 'submarine-cables-source', submarineCablesGeoJSON, 600);
   useImperativeSource(mapForHook, 'ships', shipsGeoJSON, 75);
   useImperativeSource(mapForHook, 'meshtastic-source', meshtasticGeoJSON, 60);
   useImperativeSource(mapForHook, 'aprs-source', aprsGeoJSON, 60);
@@ -1761,7 +1820,7 @@ const MaplibreViewer = ({
 
   return (
     <div
-      className={`relative h-full w-full z-0 isolate ${selectedEntity && ['region_dossier', 'gdelt', 'liveuamap', 'news'].includes(selectedEntity.type) ? 'map-focus-active' : ''}`}
+      className={`relative h-full w-full z-0 isolate ${selectedEntity && ['region_dossier', 'gdelt', 'liveuamap', 'news', 'telegram_osint'].includes(selectedEntity.type) ? 'map-focus-active' : ''}`}
       style={pinPlacementMode || sarAoiDropMode ? { cursor: 'crosshair' } : undefined}
     >
       <Map
@@ -3688,6 +3747,71 @@ const MaplibreViewer = ({
           />
         </Source>
 
+        {/* Telegram OSINT — one pin per geocoded city; scroll posts in popup */}
+        <Source id="telegram-osint-source" type="geojson" data={EMPTY_FC}>
+          <Layer
+            id="telegram-osint-layer"
+            type="circle"
+            minzoom={4}
+            paint={{
+              'circle-radius': [
+                'interpolate',
+                ['linear'],
+                ['zoom'],
+                4,
+                ['case', ['>', ['get', 'post_count'], 1], 14, 11],
+                8,
+                ['case', ['>', ['get', 'post_count'], 1], 20, 16],
+                12,
+                ['case', ['>', ['get', 'post_count'], 1], 26, 22],
+              ],
+              'circle-color': '#ef4444',
+              'circle-stroke-width': 0,
+              'circle-stroke-color': '#fca5a5',
+              'circle-opacity': 0,
+            }}
+          />
+        </Source>
+
+        {/* Malware C2 — abuse.ch Feodo + URLhaus */}
+        <Source id="malware-source" type="geojson" data={EMPTY_FC} cluster={true} clusterMaxZoom={6} clusterRadius={35}>
+          <Layer
+            id="malware-clusters"
+            type="circle"
+            filter={['has', 'point_count']}
+            paint={{
+              'circle-radius': ['step', ['get', 'point_count'], 12, 8, 16, 30, 22],
+              'circle-color': 'rgba(255, 61, 61, 0.75)',
+              'circle-stroke-width': 2,
+              'circle-stroke-color': '#ff3d3d',
+            }}
+          />
+          <Layer
+            id="malware-layer"
+            type="circle"
+            filter={['!', ['has', 'point_count']]}
+            paint={{
+              'circle-radius': 5,
+              'circle-color': '#ff1744',
+              'circle-stroke-width': 1,
+              'circle-stroke-color': '#ff8a80',
+            }}
+          />
+        </Source>
+
+        {/* Submarine cables — static TeleGeography GeoJSON */}
+        <Source id="submarine-cables-source" type="geojson" data={EMPTY_FC}>
+          <Layer
+            id="submarine-cables-layer"
+            type="line"
+            paint={{
+              'line-color': '#eab308',
+              'line-width': ['interpolate', ['linear'], ['zoom'], 2, 0.5, 6, 1.2, 10, 2],
+              'line-opacity': 0.75,
+            }}
+          />
+        </Source>
+
         {/* Ships — rendered below flights (water surface level) */}
         <Source
           id="ships"
@@ -4289,6 +4413,13 @@ const MaplibreViewer = ({
             }}
           />
         )}
+
+        {activeLayers.telegram_osint && !isMapInteracting && telegramOsintGeoJSONPlaced?.features?.length ? (
+          <TelegramOsintMarkers
+            features={telegramOsintGeoJSONPlaced.features}
+            onEntityClick={onEntityClick}
+          />
+        ) : null}
 
         {/* Satellite positions — mission-type icons */}
         {/* satellites: data pushed imperatively */}
@@ -5428,6 +5559,66 @@ const MaplibreViewer = ({
             );
           })()}
 
+        {/* Earthquake popup */}
+        {selectedEntity?.type === 'earthquake' &&
+          (() => {
+            const extra = (selectedEntity.extra || {}) as Record<string, unknown>;
+            const idx = Number(selectedEntity.id);
+            const eq = Number.isFinite(idx)
+              ? data?.earthquakes?.[idx]
+              : data?.earthquakes?.find((e) => e.id === String(selectedEntity.id));
+            const lat = typeof eq?.lat === 'number' ? eq.lat : Number(extra.lat);
+            const lng = typeof eq?.lng === 'number' ? eq.lng : Number(extra.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            const mag = eq?.mag ?? Number(extra.mag);
+            const place = eq?.place || String(extra.place || selectedEntity.name || 'Unknown location');
+            const accent = mag >= 6 ? '#ef4444' : mag >= 4.5 ? '#f97316' : '#eab308';
+            return (
+              <Popup
+                longitude={lng}
+                latitude={lat}
+                closeButton={false}
+                closeOnClick={false}
+                onClose={() => onEntityClick?.(null)}
+                className="threat-popup"
+                maxWidth="280px"
+              >
+                <div className="map-popup bg-[#1a1035] min-w-[200px]" style={{ borderColor: `${accent}66` }}>
+                  <div className="map-popup-title pb-1" style={{ color: accent, borderBottom: `1px solid ${accent}33` }}>
+                    M{Number.isFinite(mag) ? mag.toFixed(1) : '?'} — EARTHQUAKE
+                  </div>
+                  <div className="map-popup-row">
+                    Location: <span className="text-white">{place}</span>
+                  </div>
+                  <div className="map-popup-row">
+                    Coords:{' '}
+                    <span className="text-white font-mono">
+                      {lat.toFixed(3)}, {lng.toFixed(3)}
+                    </span>
+                  </div>
+                  {oracleIntel?.found && (
+                    <div className="mt-2 pt-2 border-t border-yellow-500/20">
+                      <div className="text-[10px] font-mono text-yellow-500/80 tracking-wider mb-1">REGION INTEL</div>
+                      <div className="text-[10px] font-mono text-white/70">
+                        ORACLE: {oracleIntel.tier}
+                        {oracleIntel.avg_sentiment != null && (
+                          <span className="text-gray-400">
+                            {' '}
+                            · SENT {oracleIntel.avg_sentiment > 0 ? '+' : ''}
+                            {oracleIntel.avg_sentiment.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div className="mt-1.5 text-[9px] tracking-wider" style={{ color: `${accent}99` }}>
+                    SEISMIC — USGS
+                  </div>
+                </div>
+              </Popup>
+            );
+          })()}
+
         {/* Volcano popup */}
         {selectedEntity?.type === 'volcano' &&
           (() => {
@@ -5520,6 +5711,28 @@ const MaplibreViewer = ({
             if (!dest || dest === 'UNKNOWN') return null;
             return <FishingDestinationRoute vesselLat={event.lat} vesselLng={event.lng} destination={dest} />;
           })()}
+
+        {(() => {
+          if (selectedEntity?.type !== 'telegram_osint' || !data?.telegram_osint?.posts) return null;
+          const allPosts = data.telegram_osint.posts;
+          const clusterPosts = allPosts.filter((p) => {
+            if (!p.coords || p.coords.length < 2) return false;
+            const key = telegramClusterKey(p.coords[0], p.coords[1]);
+            return key === selectedEntity.id || p.id === selectedEntity.id;
+          });
+          const anchor = clusterPosts[0]?.coords;
+          if (!anchor || anchor.length < 2) return null;
+          const avoidAlert = telegramClusterNearNewsAlert(anchor[0], anchor[1], data?.news);
+          const [pinLat, pinLng] = telegramMapPinCoords(anchor[0], anchor[1], avoidAlert);
+          return (
+            <TelegramOsintPopup
+              posts={clusterPosts}
+              lat={pinLat}
+              lng={pinLng}
+              onClose={() => onEntityClick?.(null)}
+            />
+          );
+        })()}
 
         {(() => {
           if (selectedEntity?.type !== 'gdelt' || !data?.gdelt) return null;

@@ -83,6 +83,13 @@ READ_COMMANDS = frozenset({
     "sar_pin_click",
     # Analysis zones (OpenClaw map overlays)
     "list_analysis_zones",
+    # Recon / OSINT toolkit (server-side proxies, SSRF guarded)
+    "osint_lookup",
+    "osint_tools",
+    "entity_expand",
+    # Agent routing helpers
+    "route_query",
+    "run_playbook",
 })
 
 WRITE_COMMANDS = frozenset({
@@ -112,6 +119,8 @@ WRITE_COMMANDS = frozenset({
     "place_analysis_zone",
     "delete_analysis_zone",
     "clear_analysis_zones",
+    # Active recon (subnet device discovery)
+    "osint_sweep",
 })
 
 
@@ -637,6 +646,19 @@ def _compact_query_result(result: Any) -> Any:
 # Command dispatcher
 # ---------------------------------------------------------------------------
 
+def _expensive_gate(cmd: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    from services.openclaw_routing import EXPENSIVE_GATE_MESSAGE, requires_expensive_confirm
+
+    if requires_expensive_confirm(cmd, args):
+        return {
+            "ok": False,
+            "detail": EXPENSIVE_GATE_MESSAGE,
+            "code": "expensive_command_blocked",
+            "hint": "route_query",
+        }
+    return None
+
+
 def _dispatch_command(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
     """Route a command to the appropriate AI Intel function.
 
@@ -644,6 +666,43 @@ def _dispatch_command(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
     Commands run in an isolated thread (via _execute_command) so they
     do not need or touch the caller's event loop.
     """
+    blocked = _expensive_gate(cmd, args)
+    if blocked is not None:
+        return blocked
+
+    if cmd == "route_query":
+        from services.openclaw_routing import route_query
+
+        result = route_query(
+            text=str(args.get("text", "") or args.get("query", "") or ""),
+            lat=args.get("lat"),
+            lng=args.get("lng"),
+            radius_km=float(args.get("radius_km", 50) or 50),
+            compact=bool(args.get("compact", True)),
+        )
+        return {"ok": True, "data": result}
+
+    if cmd == "run_playbook":
+        from services.openclaw_routing import plan_playbook
+
+        plan = plan_playbook(str(args.get("name", "") or args.get("playbook", "")), args)
+        if not plan.get("ok"):
+            return plan
+        batch_results: list[dict[str, Any]] = []
+        for item in plan.get("batch", []):
+            inner_cmd = str(item.get("cmd", "")).strip().lower()
+            inner_args = item.get("args") or {}
+            inner_result = _dispatch_command(inner_cmd, inner_args)
+            batch_results.append({"cmd": inner_cmd, **inner_result})
+        return {
+            "ok": True,
+            "data": {
+                "playbook": plan.get("playbook"),
+                "description": plan.get("description", ""),
+                "results": batch_results,
+            },
+        }
+
     if cmd == "get_telemetry":
         from services.telemetry import get_cached_telemetry_refs
         data = get_cached_telemetry_refs()
@@ -725,6 +784,7 @@ def _dispatch_command(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
             owner=str(args.get("owner", "") or args.get("operator", "") or ""),
             layers=args.get("layers") if isinstance(args.get("layers"), (list, tuple)) else None,
             limit=args.get("limit", 10),
+            fallback_search=bool(args.get("fallback_search") or args.get("confirm_fuzzy")),
         )
         if _wants_compact(args):
             compact = dict(result)
@@ -780,6 +840,7 @@ def _dispatch_command(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
             query=str(args.get("query", "") or ""),
             limit=args.get("limit", 10),
             include_gdelt=bool(args.get("include_gdelt", True)),
+            include_telegram=bool(args.get("include_telegram", True)),
         )
         if _wants_compact(args):
             return {"ok": True, "data": _compact_query_result(result), "format": "compressed_v1"}
@@ -844,6 +905,26 @@ def _dispatch_command(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
         )
         if _wants_compact(args):
             return {"ok": True, "data": _compact_query_result(result), "format": "compressed_v1"}
+        return {"ok": True, "data": result}
+
+    if cmd == "osint_lookup":
+        from services.osint.openclaw_recon import run_osint_lookup
+        tool = str(args.get("tool", "") or args.get("lookup", "") or args.get("type", "") or "")
+        result = run_osint_lookup(tool, args)
+        return {"ok": True, "data": result, "tool": tool.strip().lower()}
+
+    if cmd == "osint_tools":
+        from services.osint.openclaw_recon import osint_tool_help
+        return {"ok": True, "data": osint_tool_help()}
+
+    if cmd == "osint_sweep":
+        from services.osint.openclaw_recon import run_osint_sweep
+        result = run_osint_sweep(args)
+        return {"ok": True, "data": result}
+
+    if cmd == "entity_expand":
+        from services.osint.openclaw_recon import run_entity_expand
+        result = run_entity_expand(args)
         return {"ok": True, "data": result}
 
     if cmd == "get_report":
@@ -1065,6 +1146,7 @@ def _dispatch_command(cmd: str, args: dict[str, Any]) -> dict[str, Any]:
             owner=str(args.get("owner", "") or args.get("operator", "") or ""),
             layers=args.get("layers") if isinstance(args.get("layers"), (list, tuple)) else None,
             limit=5,
+            fallback_search=True,
         )
         best = lookup.get("best_match") if isinstance(lookup.get("best_match"), dict) else {}
         group = str(best.get("group", "") or entity_type).lower()

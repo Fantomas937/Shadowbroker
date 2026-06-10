@@ -502,6 +502,8 @@ async def update_layers(update: LayerUpdate, request: Request):
     old_mesh = is_any_active("sigint_meshtastic")
     old_aprs = is_any_active("sigint_aprs")
     old_viirs = is_any_active("viirs_nightlights")
+    old_datacenters = is_any_active("datacenters")
+    old_fishing = is_any_active("fishing_activity")
     changed = False
     for key, value in update.layers.items():
         if key in active_layers:
@@ -514,6 +516,8 @@ async def update_layers(update: LayerUpdate, request: Request):
     new_mesh = is_any_active("sigint_meshtastic")
     new_aprs = is_any_active("sigint_aprs")
     new_viirs = is_any_active("viirs_nightlights")
+    new_datacenters = is_any_active("datacenters")
+    new_fishing = is_any_active("fishing_activity")
     if old_ships and not new_ships:
         from services.ais_stream import stop_ais_stream
         stop_ais_stream()
@@ -557,6 +561,16 @@ async def update_layers(update: LayerUpdate, request: Request):
     if not old_viirs and new_viirs:
         _queue_viirs_change_refresh()
         logger.info("VIIRS change refresh queued (layer enabled)")
+    if not old_datacenters and new_datacenters:
+        from services.fetchers.infrastructure import fetch_datacenters
+
+        fetch_datacenters()
+        logger.info("Datacenters loaded (layer enabled)")
+    if not old_fishing and new_fishing:
+        from services.fetchers.geo import fetch_fishing_activity
+
+        fetch_fishing_activity()
+        logger.info("Fishing activity refresh queued (layer enabled)")
     return {"status": "ok"}
 
 
@@ -759,6 +773,7 @@ async def live_data_slow(
         "scanners", "weather_alerts", "ukraine_alerts", "air_quality", "volcanoes",
         "fishing_activity", "psk_reporter", "correlations", "uap_sightings", "wastewater",
         "crowdthreat", "threat_level", "trending_markets", "road_corridor_trends",
+        "malware_threats", "cyber_threats", "scm_suppliers", "telegram_osint",
     )
     freshness = get_source_timestamps_snapshot()
     payload = {
@@ -804,6 +819,26 @@ async def live_data_slow(
         )
         if active_layers.get("road_corridor_trends", False)
         else {"updated_at": None, "corridors": []},
+        "malware_threats": (
+            d.get("malware_threats") or {"threats": [], "total": 0}
+        )
+        if active_layers.get("malware_c2", False)
+        else {"threats": [], "total": 0},
+        "cyber_threats": (
+            d.get("cyber_threats") or {"threats": [], "stats": {}}
+        )
+        if active_layers.get("cyber_threats", False)
+        else {"threats": [], "stats": {}},
+        "scm_suppliers": (
+            d.get("scm_suppliers") or {"suppliers": [], "total": 0, "critical_count": 0}
+        )
+        if active_layers.get("scm_suppliers", False)
+        else {"suppliers": [], "total": 0, "critical_count": 0},
+        "telegram_osint": (
+            d.get("telegram_osint") or {"posts": [], "total": 0, "geolocated": 0}
+        )
+        if active_layers.get("telegram_osint", True)
+        else {"posts": [], "total": 0, "geolocated": 0},
         "freshness": freshness,
     }
     # Issue #288: bbox filter heavy/dense layers only when all four bounds

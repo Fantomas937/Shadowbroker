@@ -38,6 +38,20 @@ const API_GUIDES = [
     url: 'https://aisstream.io/authenticate',
     color: 'blue',
   },
+  {
+    name: 'Global Fishing Watch',
+    icon: <Ship size={14} className="text-teal-400" />,
+    required: false,
+    description:
+      'Fishing-vessel activity events for the Fishing Activity map layer. Optional but recommended for maritime OSINT.',
+    steps: [
+      'Create a free account at globalfishingwatch.org',
+      'Open Our APIs and create an API token',
+      'Paste the token into Quick Local Setup above or Settings → API Keys → Maritime',
+    ],
+    url: 'https://globalfishingwatch.org/our-apis/',
+    color: 'teal',
+  },
 ];
 
 const FREE_SOURCES = [
@@ -65,6 +79,7 @@ const OnboardingModal = React.memo(function OnboardingModal({
     OPENSKY_CLIENT_ID: '',
     OPENSKY_CLIENT_SECRET: '',
     AIS_API_KEY: '',
+    GFW_API_TOKEN: '',
   });
   const [setupSaving, setSetupSaving] = useState(false);
   const [setupMsg, setSetupMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -110,7 +125,12 @@ const OnboardingModal = React.memo(function OnboardingModal({
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.detail || 'Could not save API keys.');
       }
-      setSetupKeys({ OPENSKY_CLIENT_ID: '', OPENSKY_CLIENT_SECRET: '', AIS_API_KEY: '' });
+      setSetupKeys({
+        OPENSKY_CLIENT_ID: '',
+        OPENSKY_CLIENT_SECRET: '',
+        AIS_API_KEY: '',
+        GFW_API_TOKEN: '',
+      });
       setSetupMsg({ type: 'ok', text: 'Keys saved locally. Restart or refresh feeds to use them.' });
     } catch (error) {
       setSetupMsg({
@@ -557,8 +577,9 @@ const OnboardingModal = React.memo(function OnboardingModal({
                       </p>
                       <p className="text-sm text-[var(--text-secondary)] font-mono leading-relaxed">
                         OpenSky Network and AIS Stream are the free keys that make ShadowBroker
-                        useful immediately: live aircraft and vessel tracking. Paste them below or
-                        use Settings later; secrets stay on the local backend.
+                        useful immediately: live aircraft and vessel tracking. Global Fishing Watch
+                        unlocks the fishing-activity layer. Paste them below or use Settings later;
+                        secrets stay on the local backend.
                       </p>
                     </div>
                   </div>
@@ -578,6 +599,7 @@ const OnboardingModal = React.memo(function OnboardingModal({
                     ['OPENSKY_CLIENT_ID', 'OpenSky Client ID'],
                     ['OPENSKY_CLIENT_SECRET', 'OpenSky Client Secret'],
                     ['AIS_API_KEY', 'AIS Stream API Key'],
+                    ['GFW_API_TOKEN', 'Global Fishing Watch API Token (optional)'],
                   ].map(([key, label]) => (
                     <input
                       key={key}
@@ -618,9 +640,15 @@ const OnboardingModal = React.memo(function OnboardingModal({
                       <div className="flex items-center gap-2">
                         {api.icon}
                         <span className="text-xs font-mono text-white font-bold">{api.name}</span>
-                        <span className="text-[12px] font-mono px-1.5 py-0.5 border border-yellow-500/30 text-yellow-400 bg-yellow-950/20">
-                          REQUIRED
-                        </span>
+                        {api.required ? (
+                          <span className="text-[12px] font-mono px-1.5 py-0.5 border border-yellow-500/30 text-yellow-400 bg-yellow-950/20">
+                            REQUIRED
+                          </span>
+                        ) : (
+                          <span className="text-[12px] font-mono px-1.5 py-0.5 border border-teal-500/30 text-teal-300 bg-teal-950/20">
+                            OPTIONAL
+                          </span>
+                        )}
                       </div>
                       <a
                         href={api.url}

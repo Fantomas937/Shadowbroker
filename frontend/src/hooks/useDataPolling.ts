@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { API_BASE } from "@/lib/api";
 import { mergeData, setBackendStatus as setStoreBackendStatus } from "./useDataStore";
-import { appendLiveDataBoundsParams } from "@/lib/liveDataViewport";
+import { appendLiveDataBoundsParams, liveDataBoundsKey } from "@/lib/liveDataViewport";
+import { VIEWPORT_COMMITTED_EVENT } from "@/components/map/hooks/useViewportBounds";
 
 export type BackendStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -83,6 +84,10 @@ function hasMeaningfulFastData(json: FastDataProbe): boolean {
  */
 export const LAYER_TOGGLE_EVENT = 'sb:layer-toggle';
 
+/** Debounce rapid pans; min gap keeps viewport refetches under the 120/min rate limit. */
+const VIEWPORT_FAST_REFETCH_DEBOUNCE_MS = 400;
+const VIEWPORT_FAST_REFETCH_MIN_INTERVAL_MS = 2500;
+
 /**
  * Polls the backend for fast and slow data tiers.
  *
@@ -93,6 +98,9 @@ export const LAYER_TOGGLE_EVENT = 'sb:layer-toggle';
  * filtered backend-side, so panning never reveals an "empty world" of
  * infrastructure. World-zoomed views skip bbox params entirely and hit
  * the shared ETag cache exactly like the pre-#288 behaviour.
+ *
+ * Viewport commits trigger a debounced fast-tier refetch so regional pans
+ * refill aircraft/ships without waiting for the 15s poll cadence.
  *
  * The AIS stream viewport POST (/api/viewport) is still handled separately
  * by useViewportBounds to limit upstream AIS ingestion.
@@ -110,8 +118,12 @@ export function useDataPolling() {
     let fetchedStartupFastPayload = false;
     let fastTimerId: ReturnType<typeof setTimeout> | null = null;
     let slowTimerId: ReturnType<typeof setTimeout> | null = null;
+    let viewportDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const fastAbortRef = { current: null as AbortController | null };
     const slowAbortRef = { current: null as AbortController | null };
+    const fastFetchGenRef = { current: 0 };
+    let lastViewportFetchKey: string | null = null;
+    let lastViewportFetchAt = 0;
 
     const fetchCriticalBootstrap = async () => {
       try {
@@ -138,6 +150,13 @@ export function useDataPolling() {
       }
     };
 
+    const abortInFlightFastFetch = () => {
+      if (fastAbortRef.current) {
+        fastAbortRef.current.abort();
+        fastAbortRef.current = null;
+      }
+    };
+
     const fetchFastData = async () => {
       if (fastTimerId) {
         clearTimeout(fastTimerId);
@@ -145,9 +164,12 @@ export function useDataPolling() {
       }
       // Skip fetch when Time Machine snapshot mode is active
       if (_pollingPaused) { scheduleNext('fast'); return; }
-      if (fastAbortRef.current) return;
+
+      abortInFlightFastFetch();
       const controller = new AbortController();
       fastAbortRef.current = controller;
+      const fetchGen = ++fastFetchGenRef.current;
+
       try {
         const useStartupPayload = !fetchedStartupFastPayload && !fastEtag.current;
         const headers: Record<string, string> = {};
@@ -159,9 +181,10 @@ export function useDataPolling() {
           headers,
           signal: controller.signal,
         });
+        if (fetchGen !== fastFetchGenRef.current) return;
         if (res.status === 304) {
           setStoreBackendStatus('connected');
-          scheduleNext('fast');
+          scheduleNext('fast', fetchGen);
           return;
         }
         if (res.ok) {
@@ -171,6 +194,7 @@ export function useDataPolling() {
           fastEtag.current = useStartupPayload ? null : res.headers.get('etag') || null;
           if (useStartupPayload) fetchedStartupFastPayload = true;
           const json = await res.json();
+          if (fetchGen !== fastFetchGenRef.current) return;
           mergeData(json);
           if (hasMeaningfulFastData(json)) hasData = true;
         }
@@ -189,7 +213,7 @@ export function useDataPolling() {
           fastAbortRef.current = null;
         }
       }
-      scheduleNext('fast');
+      scheduleNext('fast', fetchGen);
     };
 
     const fetchSlowData = async () => {
@@ -231,8 +255,9 @@ export function useDataPolling() {
     };
 
     // Adaptive polling: retry every 3s during startup, back off to normal cadence once data arrives
-    const scheduleNext = (tier: 'fast' | 'slow') => {
+    const scheduleNext = (tier: 'fast' | 'slow', fetchGen?: number) => {
       if (tier === 'fast') {
+        if (fetchGen !== undefined && fetchGen !== fastFetchGenRef.current) return;
         const delay = hasData ? 15000 : 3000; // 3s startup retry → 15s steady state
         const needsFullFastPayload = fetchedStartupFastPayload && !fastEtag.current;
         fastTimerId = setTimeout(fetchFastData, needsFullFastPayload ? 750 : delay);
@@ -240,6 +265,34 @@ export function useDataPolling() {
         const delay = hasData ? 120000 : 5000; // 5s startup retry → 120s steady state
         slowTimerId = setTimeout(fetchSlowData, delay);
       }
+    };
+
+    const queueViewportFastRefetch = () => {
+      if (_pollingPaused) return;
+
+      const key = liveDataBoundsKey();
+      if (!key) {
+        lastViewportFetchKey = null;
+        return;
+      }
+      if (key === lastViewportFetchKey) return;
+
+      if (viewportDebounceTimer) clearTimeout(viewportDebounceTimer);
+      viewportDebounceTimer = setTimeout(() => {
+        viewportDebounceTimer = null;
+        if (_pollingPaused) return;
+
+        const currentKey = liveDataBoundsKey();
+        if (!currentKey || currentKey === lastViewportFetchKey) return;
+
+        const now = Date.now();
+        if (now - lastViewportFetchAt < VIEWPORT_FAST_REFETCH_MIN_INTERVAL_MS) return;
+
+        lastViewportFetchKey = currentKey;
+        lastViewportFetchAt = now;
+        fastEtag.current = null;
+        void fetchFastData();
+      }, VIEWPORT_FAST_REFETCH_DEBOUNCE_MS);
     };
 
     // When a layer toggle fires, immediately refetch slow data so the user
@@ -251,6 +304,7 @@ export function useDataPolling() {
       fetchSlowData();
     };
     window.addEventListener(LAYER_TOGGLE_EVENT, onLayerToggle);
+    window.addEventListener(VIEWPORT_COMMITTED_EVENT, queueViewportFastRefetch);
 
     void (async () => {
       await fetchCriticalBootstrap();
@@ -261,9 +315,11 @@ export function useDataPolling() {
 
     return () => {
       window.removeEventListener(LAYER_TOGGLE_EVENT, onLayerToggle);
+      window.removeEventListener(VIEWPORT_COMMITTED_EVENT, queueViewportFastRefetch);
       if (fastTimerId) clearTimeout(fastTimerId);
       if (slowTimerId) clearTimeout(slowTimerId);
-      if (fastAbortRef.current) fastAbortRef.current.abort();
+      if (viewportDebounceTimer) clearTimeout(viewportDebounceTimer);
+      abortInFlightFastFetch();
       if (slowAbortRef.current) slowAbortRef.current.abort();
     };
   }, []);

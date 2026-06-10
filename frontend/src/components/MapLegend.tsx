@@ -183,6 +183,7 @@ const LEGEND: LegendCategory[] = [
     color: 'text-red-400 border-red-500/30',
     items: [
       { svg: triangle('#ffaa00'), label: 'GDELT / LiveUA event (yellow)' },
+      { svg: dot('#ef4444'), label: 'Telegram OSINT post (red, geolocated)' },
       { svg: triangle('#ff0000'), label: 'Violent / Kinetic event (red)' },
       {
         svg: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="#ffff00" stroke="#ff0000" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>`,

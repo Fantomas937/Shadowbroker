@@ -21,6 +21,10 @@ import InfonetTerminal from '@/components/InfonetTerminal';
 import { leaveWormhole, fetchWormholeState } from '@/mesh/wormholeClient';
 import { teardownWormholeOnClose } from '@/lib/wormholeTeardown';
 import ShodanPanel from '@/components/ShodanPanel';
+import ReconPanel from '@/components/ReconPanel';
+import ScmPanel from '@/components/ScmPanel';
+import EntityGraphPanel from '@/components/EntityGraphPanel';
+import { isEntityGraphEligible } from '@/lib/entityGraph';
 import AIIntelPanel from '@/components/AIIntelPanel';
 import GlobalTicker from '@/components/GlobalTicker';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -71,6 +75,10 @@ export default function Dashboard() {
   useDataPolling();
   const { mouseCoords, locationLabel, handleMouseCoords } = useReverseGeocode();
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntity | null>(null);
+  const [showEntityGraph, setShowEntityGraph] = useState(false);
+  useEffect(() => {
+    setShowEntityGraph(false);
+  }, [selectedEntity]);
   const [trackedSdr, setTrackedSdr] = useState<KiwiSDR | null>(null);
   const [trackedScanner, setTrackedScanner] = useState<Scanner | null>(null);
   const { regionDossier, regionDossierLoading, handleMapRightClick } = useRegionDossier(
@@ -186,6 +194,11 @@ export default function Dashboard() {
     sentinel_hub: false,
     viirs_nightlights: false,
     road_corridor_trends: false,
+    malware_c2: false,
+    submarine_cables: false,
+    scm_suppliers: false,
+    cyber_threats: false,
+    telegram_osint: true,
     // Hazards — no fire, rest ON
     earthquakes: true,
     firms: false,
@@ -636,7 +649,15 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* 4. AI INTEL (Below Shodan) */}
+              {/* 4. RECON + SCM */}
+              {secondaryBootReady && (
+                <div className="contents" style={{ direction: 'ltr' }}>
+                  <ReconPanel />
+                  <ScmPanel layerEnabled={activeLayers.scm_suppliers} />
+                </div>
+              )}
+
+              {/* 5. AI INTEL */}
               {secondaryBootReady && (
                 <div className="contents" style={{ direction: 'ltr' }}>
                   <AIIntelPanel
@@ -748,6 +769,9 @@ export default function Dashboard() {
                     selectedEntity={selectedEntity}
                     regionDossier={regionDossier}
                     regionDossierLoading={regionDossierLoading}
+                    onExpandEntityGraph={() => {
+                      if (isEntityGraphEligible(selectedEntity)) setShowEntityGraph(true);
+                    }}
                     onArticleClick={(idx, lat, lng, title) => {
                       if (lat !== undefined && lng !== undefined) {
                         setFlyToLocation({ lat, lng, ts: Date.now() });
@@ -988,6 +1012,10 @@ export default function Dashboard() {
           onDmCount={setDmCount}
           onSettingsClick={() => setSettingsOpen(true)}
         />
+
+        {showEntityGraph && selectedEntity && isEntityGraphEligible(selectedEntity) && (
+          <EntityGraphPanel entity={selectedEntity} onClose={() => setShowEntityGraph(false)} />
+        )}
 
         {/* INFONET TERMINAL */}
         <InfonetTerminal

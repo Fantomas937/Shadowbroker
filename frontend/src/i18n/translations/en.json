@@ -203,7 +203,12 @@
     "aiIntel": "AI Intel",
     "sar": "SAR",
     "roadCorridorTrends": "Road Freight Trends",
-    "roadCorridorSource": "Copernicus S-2 · trends not live"
+    "roadCorridorSource": "Copernicus S-2 · trends not live",
+    "submarineCables": "Submarine Cables",
+    "malwareC2": "Malware C2",
+    "scmSuppliers": "SCM Suppliers",
+    "cyberThreats": "Cyber Threats",
+    "telegramOsint": "Telegram OSINT"
   },
   "roadCorridor": {
     "analyzeHere": "ANALYZE HERE",
@@ -213,6 +218,15 @@
     "missingCreds": "Add Sentinel creds in Settings → Imagery",
     "panMapFirst": "Pan the map to choose an area",
     "analyzeFailed": "Analysis failed"
+  },
+  "recon": {
+    "title": "Recon Toolkit",
+    "proxyNote": "Server-side proxy · local operator only"
+  },
+  "scm": {
+    "title": "Supply Chain",
+    "allClear": "No elevated risk at monitored Tier 1/2 nodes.",
+    "layerOff": "Off — enable Supply Chain in Data Layers to monitor fabs."
   },
   "shodan": {
     "title": "Shodan Connector",
@@ -253,5 +267,12 @@
     "vegetation": "Vegetation Disturbance",
     "damage": "Damage Assessment",
     "coherence": "Coherence Change"
+  },
+  "telegram": {
+    "disclaimer": "WARNING: Content below is loaded from public Telegram channels. Shadowbroker does not host, verify, or endorse it. What you view is entirely at your own risk and has nothing to do with Shadowbroker.",
+    "loadMedia": "VIEW MEDIA (TELEGRAM)",
+    "openOriginal": "OPEN ON TELEGRAM →",
+    "embedTitle": "Telegram post embed",
+    "postsAtLocation": "{count} posts at this location — scroll for more"
   }
 }

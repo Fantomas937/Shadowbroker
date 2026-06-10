@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from json import JSONDecodeError
 
-APP_VERSION = "0.9.81"
+APP_VERSION = "0.9.82"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -366,6 +366,10 @@ ai_intel_router = _load_optional_router("routers.ai_intel")
 sar_router = _load_optional_router("routers.sar")
 infonet_router = _load_optional_router("routers.infonet")
 road_corridors_router = _load_optional_router("routers.road_corridors")
+osint_router = _load_optional_router("routers.osint")
+scm_router = _load_optional_router("routers.scm")
+entity_graph_router = _load_optional_router("routers.entity_graph")
+intel_feeds_router = _load_optional_router("routers.intel_feeds")
 
 
 # ---------------------------------------------------------------------------
@@ -3643,6 +3647,10 @@ app.include_router(ai_intel_router)
 app.include_router(sar_router)
 app.include_router(infonet_router)
 app.include_router(road_corridors_router)
+app.include_router(osint_router)
+app.include_router(scm_router)
+app.include_router(entity_graph_router)
+app.include_router(intel_feeds_router)
 
 from services.data_fetcher import update_all_data
 
@@ -3774,6 +3782,8 @@ async def update_layers(update: LayerUpdate, request: Request):
     old_mesh = is_any_active("sigint_meshtastic")
     old_aprs = is_any_active("sigint_aprs")
     old_viirs = is_any_active("viirs_nightlights")
+    old_datacenters = is_any_active("datacenters")
+    old_fishing = is_any_active("fishing_activity")
 
     # Update only known keys
     changed = False
@@ -3792,6 +3802,8 @@ async def update_layers(update: LayerUpdate, request: Request):
     new_mesh = is_any_active("sigint_meshtastic")
     new_aprs = is_any_active("sigint_aprs")
     new_viirs = is_any_active("viirs_nightlights")
+    new_datacenters = is_any_active("datacenters")
+    new_fishing = is_any_active("fishing_activity")
 
     # Start/stop AIS stream on transition
     if old_ships and not new_ships:
@@ -3846,6 +3858,18 @@ async def update_layers(update: LayerUpdate, request: Request):
     if not old_viirs and new_viirs:
         _queue_viirs_change_refresh()
         logger.info("VIIRS change refresh queued (layer enabled)")
+
+    if not old_datacenters and new_datacenters:
+        from services.fetchers.infrastructure import fetch_datacenters
+
+        fetch_datacenters()
+        logger.info("Datacenters loaded (layer enabled)")
+
+    if not old_fishing and new_fishing:
+        from services.fetchers.geo import fetch_fishing_activity
+
+        fetch_fishing_activity()
+        logger.info("Fishing activity refresh queued (layer enabled)")
 
     return {"status": "ok"}
 
@@ -7834,6 +7858,8 @@ _CCTV_PROXY_ALLOWED_HOSTS = {
     "www.tripcheck.com",
     "infocar.dgt.es",  # Spain DGT
     "informo.madrid.es",  # Madrid
+    "webcams2.asfinag.at",  # Austria ASFINAG motorway cameras
+    "odo.asfinag.at",  # ASFINAG catalog API host
     "www.windy.com",
     "imgproxy.windy.com",  # Windy preview image CDN
     "www.lakecountypassage.com",  # Illinois Lake County PASSAGE snapshots
@@ -7842,6 +7868,14 @@ _CCTV_PROXY_ALLOWED_HOSTS = {
     "www.nps.gov",  # WSDOT-linked Mount Rainier camera
     "home.lewiscounty.com",  # WSDOT partner public camera
     "www.seattle.gov",  # Seattle traffic camera media linked from WSDOT
+    "511on.ca",  # Ontario 511 cameras
+    "511.alberta.ca",  # Alberta 511 cameras
+    "fl511.com",  # Florida 511 cameras
+    "www.fl511.com",
+    "webcams.transport.nsw.gov.au",  # NSW Live Traffic camera snapshots
+    "www.livetraffic.com",
+    "livetraffic.com",
+    "opendata.ndw.nu",  # Netherlands RWS legacy open-data host
 }
 
 
@@ -7937,7 +7971,7 @@ def _cctv_proxy_profile_for_url(target_url: str) -> _CCTVProxyProfile:
             cache_seconds=15,
             headers={
                 "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                "Referer": "http://navigator-c2c.dot.ga.gov/",
+                "Referer": "https://navigator-c2c.dot.ga.gov/",
             },
         )
     if host == "511ga.org":
@@ -7957,7 +7991,7 @@ def _cctv_proxy_profile_for_url(target_url: str) -> _CCTVProxyProfile:
             cache_seconds=10,
             headers={
                 "Accept": "application/vnd.apple.mpegurl,application/x-mpegURL,video/*,*/*;q=0.8",
-                "Referer": "http://navigator-c2c.dot.ga.gov/",
+                "Referer": "https://navigator-c2c.dot.ga.gov/",
             },
         )
     if host in {"gettingaroundillinois.com", "cctv.travelmidwest.com"}:
@@ -8039,6 +8073,16 @@ def _cctv_proxy_profile_for_url(target_url: str) -> _CCTVProxyProfile:
                 "Referer": "https://informo.madrid.es/",
             },
         )
+    if host in {"webcams2.asfinag.at", "odo.asfinag.at"}:
+        return _CCTVProxyProfile(
+            name="asfinag-austria",
+            timeout=(5.0, 15.0),
+            cache_seconds=60,
+            headers={
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                "Referer": "https://www.asfinag.at/",
+            },
+        )
     if host in {"www.windy.com", "imgproxy.windy.com"}:
         return _CCTVProxyProfile(
             name="windy-webcams",
@@ -8047,6 +8091,56 @@ def _cctv_proxy_profile_for_url(target_url: str) -> _CCTVProxyProfile:
             headers={
                 "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
                 "Referer": "https://www.windy.com/",
+            },
+        )
+    if host == "511on.ca":
+        return _CCTVProxyProfile(
+            name="ontario-511",
+            timeout=(5.0, 15.0),
+            cache_seconds=30,
+            headers={
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                "Referer": "https://511on.ca/",
+            },
+        )
+    if host == "511.alberta.ca":
+        return _CCTVProxyProfile(
+            name="alberta-511",
+            timeout=(5.0, 15.0),
+            cache_seconds=30,
+            headers={
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                "Referer": "https://511.alberta.ca/",
+            },
+        )
+    if host in {"fl511.com", "www.fl511.com"}:
+        return _CCTVProxyProfile(
+            name="florida-511",
+            timeout=(5.0, 15.0),
+            cache_seconds=30,
+            headers={
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                "Referer": "https://fl511.com/",
+            },
+        )
+    if host == "webcams.transport.nsw.gov.au":
+        return _CCTVProxyProfile(
+            name="nsw-live-traffic",
+            timeout=(5.0, 12.0),
+            cache_seconds=60,
+            headers={
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                "Referer": "https://www.livetraffic.com/",
+            },
+        )
+    if host in {"opendata.ndw.nu", "www.ndw.nu"}:
+        return _CCTVProxyProfile(
+            name="ndw-netherlands",
+            timeout=(5.0, 12.0),
+            cache_seconds=120,
+            headers={
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+                "Referer": "https://www.ndw.nu/",
             },
         )
     if host in {

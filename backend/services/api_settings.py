@@ -52,6 +52,15 @@ API_REGISTRY = [
         "required": True,
     },
     {
+        "id": "gfw_api_token",
+        "env_key": "GFW_API_TOKEN",
+        "name": "Global Fishing Watch",
+        "description": "Bearer token for Global Fishing Watch fishing-vessel activity events (Fishing Activity map layer). Free registration at globalfishingwatch.org.",
+        "category": "Maritime",
+        "url": "https://globalfishingwatch.org/our-apis/",
+        "required": False,
+    },
+    {
         "id": "adsb_lol",
         "env_key": None,
         "name": "ADS-B Exchange (adsb.lol)",

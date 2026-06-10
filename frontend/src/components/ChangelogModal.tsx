@@ -4,183 +4,113 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
-  Terminal,
   Bot,
   Network,
-  Scale,
   KeyRound,
-  Cpu,
-  Layers,
-  GitBranch,
   Shield,
   Plane,
-  Clock,
-  Satellite,
   Bug,
   Heart,
+  MessageSquare,
+  Radar,
+  Factory,
+  Anchor,
+  Search,
 } from 'lucide-react';
 
-const CURRENT_VERSION = '0.9.81';
+const CURRENT_VERSION = '0.9.82';
 const STORAGE_KEY = `shadowbroker_changelog_v${CURRENT_VERSION}`;
-const RELEASE_TITLE = 'Signed Auto-Update + Update Button Race Fix';
+const RELEASE_TITLE = 'Telegram OSINT + Osiris Intel Ports + OpenClaw Recon';
 
 const HEADLINE_FEATURES = [
   {
-    icon: <KeyRound size={20} className="text-purple-400" />,
+    icon: <MessageSquare size={20} className="text-cyan-400" />,
+    accent: 'cyan' as const,
+    title: 'Telegram OSINT Map Layer',
+    subtitle:
+      'Public war/conflict Telegram channels scraped hourly, risk-scored, geoparsed to metro anchors, and plotted as clickable map pins with inline photo/video.',
+    details: [
+      'Incremental merge — only new posts are fetched; known links stop the parser early so channels are not re-scraped redundantly.',
+      'Metro-anchor geocoding (Tel Aviv, Kyiv, NYC, Beijing, etc.) keeps Telegram pins off news/threat-alert centroids so pins stay clickable above the threat intercept overlays.',
+      'Threat-intercept styled popups with inline media via `/api/telegram/media` proxy. Configure channels via `TELEGRAM_OSINT_CHANNELS` (see `.env.example`).',
+    ],
+    callToAction: 'TOGGLE TELEGRAM OSINT IN DATA LAYERS',
+  },
+  {
+    icon: <Radar size={20} className="text-purple-400" />,
     accent: 'purple' as const,
-    title: 'Signed Auto-Update Going Forward (one manual hop)',
-    subtitle: 'After installing v0.9.81, the in-app Update button finally works end-to-end. This release establishes a fresh signing key — every release from here is a one-click upgrade.',
+    title: 'Osiris-Derived Intel Ports (Recon, SCM, Entity Graph)',
+    subtitle:
+      'Server-side recon toolkit, supply-chain risk overlay, entity relationship graphs, malware/C2 hotspots, CISA KEV cyber feed, sanctions index, and submarine cable routes — all SSRF-guarded and local-operator proxied.',
     details: [
-      'tauri.conf.json now carries a fresh minisign pubkey (the previous keypair was generated before v0.9.79 shipped but the matching private key was lost before any release was actually signed, so no release before v0.9.81 has working auto-update).',
-      'The v0.9.81 release artifacts ship with a signed latest.json + .sig files so every install on v0.9.81 or later can verify and apply the next release automatically via the Tauri updater plugin.',
-      'One-time cost: if you are upgrading from v0.9.79 or v0.9.8, the click-Update path falls back to a manual download because the new pubkey does not match the one baked into your install. Click the MANUAL DOWNLOAD button in the update dialog → grab the .msi from the release page → run it → from then on auto-update works in-app.',
+      'Recon Toolkit panel: IP geolocation, DNS, WHOIS, certs, BGP/ASN, OFAC sanctions, CVE, MAC vendor, GitHub profile, breach checks, and InternetDB subnet sweeps.',
+      'SCM panel cross-references Tier 1/2 fabs (TSMC, Samsung, CATL, etc.) against earthquakes, wildfires, and GDELT conflict proximity.',
+      'Entity Graph expands aircraft, vessels, companies, persons, IPs, and countries via Wikidata + OFAC + live telemetry store. Attribution: `backend/third_party/osiris/NOTICE.md`.',
+      'Malware C2 (abuse.ch Feodo + URLhaus) and Cyber Threats (CISA KEV) layers opt-in on the slow tier. Submarine cables overlay from static TeleGeography-derived GeoJSON.',
     ],
-    callToAction: 'CLICK UPDATE → DOWNLOAD MSI ONCE → AUTO-UPDATE FOREVER',
+    callToAction: 'OPEN RECON • SCM • ENTITY GRAPH IN LEFT SIDEBAR',
   },
   {
-    icon: <Network size={20} className="text-amber-400" />,
+    icon: <Bot size={20} className="text-amber-400" />,
     accent: 'cyan' as const,
-    title: 'AIS Maritime Resilience — Outage Banner + AISHub Fallback',
-    subtitle: 'When AISStream’s WebSocket goes offline (as happened upstream in May 2026), the ships layer no longer goes silently empty.',
+    title: 'OpenClaw Agent — Full Telemetry + Recon Parity',
+    subtitle:
+      'AI agents on the HMAC command channel now search, slice, and investigate the same data the operator sees — including Telegram, malware, cyber, SCM, and the full recon toolkit.',
     details: [
-      'AIS proxy health surfaces in /api/health: connected, last_msg_age_seconds, proxy_spawn_count. A dismissible amber banner explains the outage (“Ship data temporarily unavailable — AISStream upstream is offline”) instead of letting users assume their install is broken.',
-      'AISHub REST fallback (free tier at aishub.net/api). Polls every 20 minutes when the primary is disconnected and merges vessels into the same store with source: “aishub” so existing tooling attributes the provider.',
-      'Live data wins races: if the WebSocket reconnects mid-poll, fresh AISStream updates aren’t overwritten by stale REST records. Opt-in via AISHUB_USERNAME; cadence configurable via AISHUB_POLL_INTERVAL_MINUTES (clamped [1, 360]).',
+      '`search_telemetry` and `search_news` index Telegram OSINT posts alongside news, GDELT, and CrowdThreat. `get_slow_telemetry` and `get_layer_slice` include `telegram_osint`, `malware_threats`, `cyber_threats`, and `scm_suppliers`.',
+      'New commands: `osint_lookup` (IP/DNS/WHOIS/sanctions/CVE/etc.), `entity_expand` (relationship graph), `osint_tools` (discovery), and `osint_sweep` (subnet scan — full access tier).',
+      'Layer aliases: `telegram`, `malware`/`botnet`, `cyber`/`cisa`/`kev`, `scm`/`suppliers`, `gfw`/`fishing`. Skill package: `openclaw-skills/shadowbroker/SKILL.md`.',
     ],
-    callToAction: 'SET AISHUB_USERNAME \u2192 RESTART BACKEND',
-  },
-  {
-    icon: <Shield size={20} className="text-cyan-400" />,
-    accent: 'cyan' as const,
-    title: 'Data-Layer Repair \u2014 UAP Cutoff + GPS Jamming Detection',
-    subtitle: 'Two long-broken layers fixed at the source. UFO sightings are actually recent now; GPS jamming zones actually fire.',
-    details: [
-      'UAP sightings: the Hugging Face NUFORC mirror fallback had no date cutoff, so when the live nuforc.org scrape failed the layer served 3-year-old reports as \u201crecent\u201d. Now drops rows older than 60 days and logs loudly when the mirror is fully stale. Scheduler moved daily \u2192 weekly (Mondays 12:00 UTC).',
-      'GPS jamming: three stacked filters meant the layer almost never lit up. nac_p == 0 (\u201cGPS lock lost\u201d) was filtered out as if it were an old transponder \u2014 it\u2019s actually the strongest jamming signal. Now counted. MIN_AIRCRAFT lowered 5 \u2192 3 so sparser hotspots clear; MIN_RATIO lowered 0.30 \u2192 0.20.',
-      'Both layers now surface their own outages via assert_canary so operators see broken vs empty, not silently stale.',
-    ],
-    callToAction: 'TOGGLE UAP \u2022 GPS JAMMING LAYERS',
+    callToAction: 'AI INTEL PANEL → CONNECT AGENT → COPY HMAC SECRET',
   },
 ];
 
 const NEW_FEATURES = [
   {
-    icon: <Plane size={18} className="text-orange-400" />,
-    title: 'Cumulative Fuel & CO2 per Flight',
-    desc: 'Aircraft tooltip now shows how much fuel each plane has actually burned in the air since first observation, not just the per-hour rate. 15-minute gap between sightings resets the session; 24-hour clamp protects against clock skew; per-icao prune every 5 minutes keeps memory bounded.',
+    icon: <Anchor size={18} className="text-cyan-400" />,
+    title: 'Global Fishing Watch in Settings',
+    desc: 'GFW API token exposed in onboarding and Settings → Maritime. Fishing activity layer backed by GFW when `GFW_API_TOKEN` is configured.',
   },
   {
-    icon: <Plane size={18} className="text-cyan-400" />,
-    title: 'Per-Flight Source Attribution',
-    desc: 'Every aircraft record now carries a source field (adsb.lol, OpenSky, airplanes.live, adsb.fi) so consumers can attribute the data provider. Pre-fix, adsb.lol records were unmarked while OpenSky records were explicitly tagged, making it look like adsb.lol was unused even though it is the primary source.',
+    icon: <Factory size={18} className="text-orange-400" />,
+    title: 'Supply-Chain Risk Map Layer',
+    desc: 'SCM suppliers render as map markers with seismic, wildfire, and conflict proximity scoring. Panel alerts for CRITICAL/HIGH fabs.',
   },
   {
-    icon: <Network size={18} className="text-green-400" />,
-    title: 'Cross-Node DM Mailbox Replication',
-    desc: 'Direct messages now replicate across mesh nodes when one party is offline. Per-(sender, recipient) anti-spam cap enforced as a network rule (not client-side) so source-code tampering cannot bypass it.',
+    icon: <Shield size={18} className="text-red-400" />,
+    title: 'Malware C2 + CISA KEV Overlays',
+    desc: 'abuse.ch botnet C2 and URLhaus distribution URLs geolocated by country; CISA Known Exploited Vulnerabilities surfaced in cyber threats feed and slow-tier payload.',
   },
   {
-    icon: <Clock size={18} className="text-amber-400" />,
-    title: 'Infonet Sync — HTTP 429 Honored',
-    desc: 'When an upstream peer returns Retry-After, the node now waits exactly that long instead of retrying every 60 seconds and keeping the upstream rate-limit bucket permanently full. Exponential backoff on consecutive failures capped at 30 minutes.',
+    icon: <Search size={18} className="text-green-400" />,
+    title: 'OpenClaw Compact Search Path',
+    desc: 'Agents prefer `get_summary` → SSE `layer_changed` → `get_layer_slice` with per-layer versions. `brief_area`, `correlate_entity`, and `entities_near` include Telegram and malware context.',
+  },
+  {
+    icon: <Network size={18} className="text-purple-400" />,
+    title: 'Submarine Cable Overlay',
+    desc: 'Opt-in undersea cable routes from static TeleGeography-derived GeoJSON for infrastructure context on the map.',
   },
 ];
 
 const BUG_FIXES = [
-  'Update button no longer throws "admin_session_required" on desktop installs. The initial updateAction now syncs to Tauri detection at React-init time (window.__TAURI__ is injected before mount), so a click before the async runtime probe completes opens the GitHub release page in a browser instead of POSTing to /api/system/update.',
-  'Desktop installer now bundles defusedxml + PySocks (declared in pyproject.toml but missing from the venv shipped with v0.9.79 and the initial v0.9.8 publish). Fixes the bundled-backend launch crash reported in #319 and #296 (managed_backend_exited_early:exit code: 103).',
-  'UAP layer no longer serves 3-year-old NUFORC sightings via the Hugging Face static-mirror fallback (60-day cutoff now applied to the fallback path too).',
-  'GPS jamming detection now counts nac_p == 0 (the actual GPS-lost signal) instead of filtering it out as an old-transponder artifact.',
-  'GPS jamming thresholds lowered (MIN_AIRCRAFT 5 → 3, MIN_RATIO 0.30 → 0.20) so sparser hotspots clear the bar without losing the 1-aircraft noise cushion.',
-  'AIS layer surfaces an outage banner when the AISStream WebSocket upstream is offline, instead of silently showing an empty ocean.',
-  'Flight emissions tooltip now shows cumulative fuel/CO2 since first observation, not just the per-hour rate.',
-  'Per-aircraft observation tracker (15-min reopen gap, 24-hour clamp) survives trail-rendering cache pruning so cumulative counters do not reset mid-flight.',
-  'UAP scheduler moved daily → weekly (Mondays 12:00 UTC) to match the layer’s rolling-window cadence and reduce upstream load.',
+  'Telegram map pins are now HTML markers above threat-alert overlays — pins are clickable even when sharing a city grid with news intercept boxes.',
+  'Telegram geocoding uses metro anchors (not national centroids) and a small NE offset only when news alerts share the same city cell — pins stay on land.',
+  'Hourly Telegram scheduler with incremental post merge — no redundant full-channel re-scrape every cycle.',
+  'OpenClaw `get_slow_telemetry` previously omitted telegram_osint, malware_threats, cyber_threats, and scm_suppliers — now included in slow-tier and universal search.',
+  'OpenClaw agents can invoke the Recon panel backends via `osint_lookup` without raw `/api/osint/*` HTTP calls or local-operator browser auth.',
 ];
 
-const CONTRIBUTORS = [
+type ChangelogContributor = {
+  name: string;
+  desc: string;
+  pr?: string;
+};
+
+const CONTRIBUTORS: ChangelogContributor[] = [
   {
-    name: '@Alienmajik',
-    desc: 'Raspberry Pi 5 support — ARM64 packaging, headless deployment notes, and runtime tuning for Pi-class hardware',
-  },
-  {
-    name: '@wa1id',
-    desc: 'CCTV ingestion fix — fresh SQLite connections per ingest, persistent DB path, startup hydration, cluster clickability',
-    pr: '#92',
-  },
-  {
-    name: '@AlborzNazari',
-    desc: 'Spain DGT + Madrid CCTV sources and STIX 2.1 threat intelligence export endpoint',
-    pr: '#91',
-  },
-  {
-    name: '@adust09',
-    desc: 'Power plants layer, East Asia intel coverage (JSDF bases, ICAO enrichment, Taiwan news sources, military classification)',
-    pr: '#71, #72, #76, #77, #87',
-  },
-  {
-    name: '@Xpirix',
-    desc: 'LocateBar style and interaction improvements',
-    pr: '#78',
-  },
-  {
-    name: '@imqdcr',
-    desc: 'Ship toggle split into 4 categories + stable MMSI/callsign entity IDs for map markers',
-    pr: '#52',
-  },
-  {
-    name: '@csysp',
-    desc: 'Dismissible threat alerts + stable entity IDs for GDELT & News popups + UI declutter',
-    pr: '#48, #61, #63',
-  },
-  {
-    name: '@suranyami',
-    desc: 'Parallel multi-arch Docker builds (11min \u2192 3min) + runtime BACKEND_URL fix',
-    pr: '#35, #44',
-  },
-  {
-    name: '@chr0n1x',
-    desc: 'Kubernetes / Helm chart architecture for high-availability deployments',
-  },
-  {
-    name: '@johan-martensson',
-    desc: 'COSMO-SkyMed satellite classification fix + yfinance batch download optimization',
-    pr: '#96, #98',
-  },
-  {
-    name: '@singularfailure',
-    desc: 'Spanish CCTV feeds + image loading fix',
-    pr: '#93',
-  },
-  {
-    name: '@smithbh',
-    desc: 'Makefile-based taskrunner with LAN/local access options',
-    pr: '#103',
-  },
-  {
-    name: '@OrfeoTerkuci',
-    desc: 'UV project management setup',
-    pr: '#102',
-  },
-  {
-    name: '@deuza',
-    desc: 'dos2unix fix for Mac/Linux quick start',
-    pr: '#101',
-  },
-  {
-    name: '@tm-const',
-    desc: 'CI/CD workflow updates',
-    pr: '#108, #109',
-  },
-  {
-    name: '@Elhard1',
-    desc: 'start.sh shell script fix',
-    pr: '#111',
-  },
-  {
-    name: '@ttulttul',
-    desc: 'Podman compose support + frontend production CSS fix',
-    pr: '#23',
+    name: 'OSIRIS (simplifaisoul/osiris)',
+    desc: 'MIT-licensed recon stack — adapted for ShadowBroker proxy model (see backend/third_party/osiris/NOTICE.md)',
   },
 ];
 
@@ -252,7 +182,6 @@ const ChangelogModal = React.memo(function ChangelogModal({ onClose }: Changelog
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto styled-scrollbar p-5 space-y-5">
-            {/* === HEADLINE PAIR: OpenClaw API + InfoNet === */}
             {HEADLINE_FEATURES.map((h, idx) => {
               const isPurple = h.accent === 'purple';
               const cardClass = isPurple
@@ -292,23 +221,6 @@ const ChangelogModal = React.memo(function ChangelogModal({ onClose }: Changelog
                     ))}
                   </div>
 
-                  {!isPurple && (
-                    <div className="flex items-start gap-2 p-2.5 border border-red-500/30 bg-red-950/20">
-                      <span className="text-red-400 text-xs mt-0.5 flex-shrink-0 font-bold">!!</span>
-                      <div className="space-y-1.5">
-                        <span className="text-[11px] font-mono text-red-400/90 leading-relaxed block font-bold">
-                          EXPERIMENTAL TESTNET &mdash; NO PRIVACY GUARANTEE
-                        </span>
-                        <span className="text-[11px] font-mono text-amber-400/80 leading-relaxed block">
-                          InfoNet messages are obfuscated but NOT encrypted end-to-end. The Mesh
-                          network (Meshtastic/APRS) is NOT private &mdash; radio transmissions are
-                          inherently public. The privacy primitive contracts are scaffolded but not
-                          yet wired. Treat all channels as open and public for now.
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="text-center pt-1">
                     <span className={ctaClass}>{h.callToAction}</span>
                   </div>
@@ -316,7 +228,22 @@ const ChangelogModal = React.memo(function ChangelogModal({ onClose }: Changelog
               );
             })}
 
-            {/* === Required-config callout: OpenSky API === */}
+            {/* Auto-update note for v0.9.81+ installs */}
+            <div className="border border-green-500/30 bg-green-950/15 p-3 flex items-start gap-3">
+              <KeyRound size={18} className="text-green-400 mt-0.5 flex-shrink-0" />
+              <div className="space-y-1">
+                <div className="text-xs font-mono text-green-300 font-bold tracking-wide uppercase">
+                  One-click update from v0.9.81
+                </div>
+                <div className="text-xs font-mono text-green-200/80 leading-relaxed">
+                  If you installed v0.9.81, the in-app Update button verifies this release via the
+                  signed Tauri updater (`latest.json` + minisign). Desktop installs on v0.9.81 or
+                  later should auto-apply v0.9.82 without a manual MSI hop.
+                </div>
+              </div>
+            </div>
+
+            {/* Required-config callout: OpenSky API */}
             <div className="border border-amber-500/40 bg-amber-950/20 p-3 flex items-start gap-3">
               <Plane size={18} className="text-amber-400 mt-0.5 flex-shrink-0" />
               <div className="space-y-1">
@@ -324,8 +251,7 @@ const ChangelogModal = React.memo(function ChangelogModal({ onClose }: Changelog
                   Required: OpenSky API credentials for airplane telemetry
                 </div>
                 <div className="text-xs font-mono text-amber-200/80 leading-relaxed">
-                  Airplane telemetry now requires an OpenSky Network OAuth2 client. Set{' '}
-                  <span className="text-amber-100 font-bold">OPENSKY_CLIENT_ID</span> and{' '}
+                  Set <span className="text-amber-100 font-bold">OPENSKY_CLIENT_ID</span> and{' '}
                   <span className="text-amber-100 font-bold">OPENSKY_CLIENT_SECRET</span> in your{' '}
                   <span className="text-amber-100 font-bold">.env</span>. Free registration:{' '}
                   <a
@@ -336,14 +262,12 @@ const ChangelogModal = React.memo(function ChangelogModal({ onClose }: Changelog
                   >
                     opensky-network.org/register
                   </a>
-                  . Without these the flights layer falls back to ADS-B-only coverage with
-                  significant gaps in Africa, Asia, and Latin America, and the startup environment
-                  check will surface a critical warning.
+                  .
                 </div>
               </div>
             </div>
 
-            {/* === Other New Features === */}
+            {/* Other New Features */}
             <div>
               <div className="text-xs font-mono tracking-[0.2em] text-cyan-400 font-bold mb-3 flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
@@ -391,7 +315,7 @@ const ChangelogModal = React.memo(function ChangelogModal({ onClose }: Changelog
             <div>
               <div className="text-xs font-mono tracking-[0.2em] text-pink-400 font-bold mb-3 flex items-center gap-2">
                 <Heart size={14} className="text-pink-400" />
-                COMMUNITY CONTRIBUTORS
+                CREDITS &amp; CONTRIBUTORS
               </div>
               <div className="space-y-1.5">
                 {CONTRIBUTORS.map((c, i) => (
@@ -399,9 +323,7 @@ const ChangelogModal = React.memo(function ChangelogModal({ onClose }: Changelog
                     key={i}
                     className="flex items-start gap-2 px-3 py-2 border border-pink-500/20 bg-pink-500/5"
                   >
-                    <span className="text-pink-400 text-xs mt-0.5 flex-shrink-0">
-                      &hearts;
-                    </span>
+                    <span className="text-pink-400 text-xs mt-0.5 flex-shrink-0">&hearts;</span>
                     <div>
                       <span className="text-[13px] font-mono text-pink-300 font-bold">
                         {c.name}

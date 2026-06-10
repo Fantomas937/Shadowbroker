@@ -26,6 +26,8 @@ export type DynamicMapLayersDataPayload = DynamicMapLayersPayload;
 
 export type DynamicMapLayersBuildPayload = {
   bounds: BoundsTuple;
+  /** When true, /api/live-data/fast already bbox-filtered this payload — skip client cull. */
+  serverBboxScoped?: boolean;
   dtSeconds: number;
   trackedIcaos: string[];
   activeLayers: {
@@ -173,6 +175,16 @@ function inView(lat: number, lng: number, bounds: BoundsTuple): boolean {
   return lng >= bounds[0] && lng <= bounds[2] && lat >= bounds[1] && lat <= bounds[3];
 }
 
+function passesViewFilter(
+  lat: number,
+  lng: number,
+  bounds: BoundsTuple,
+  serverBboxScoped: boolean,
+): boolean {
+  if (serverBboxScoped) return true;
+  return inView(lat, lng, bounds);
+}
+
 function cleanLabel(value: unknown): string {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
   return String(value).trim();
@@ -239,6 +251,7 @@ function buildFlightLayerGeoJSONWorker(
   bounds: BoundsTuple,
   dtSeconds: number,
   trackedIcaos: Set<string>,
+  serverBboxScoped: boolean,
 ): FC {
   if (!flights?.length) return null;
   const { colorMap, groundedMap, typeLabel, idPrefix, milSpecialMap, useTrackHeading } = config;
@@ -248,7 +261,7 @@ function buildFlightLayerGeoJSONWorker(
     const f = flights[i];
     if (f.lat == null || f.lng == null) continue;
     const [iLng, iLat] = interpFlightPosition(f, dtSeconds);
-    if (!inView(iLat, iLng, bounds)) continue;
+    if (!passesViewFilter(iLat, iLng, bounds, serverBboxScoped)) continue;
     if (f.icao24 && trackedIcaos.has(f.icao24.toLowerCase())) continue;
 
     const acType = classifyAircraft(f.model, f.aircraft_category);
@@ -288,6 +301,7 @@ function buildTrackedFlightsGeoJSONWorker(
   flights: Flight[] | undefined,
   bounds: BoundsTuple,
   dtSeconds: number,
+  serverBboxScoped: boolean,
 ): FC {
   if (!flights?.length) return null;
   const features: GeoJSON.Feature[] = [];
@@ -296,7 +310,7 @@ function buildTrackedFlightsGeoJSONWorker(
     const f = flights[i];
     if (f.lat == null || f.lng == null) continue;
     const [lng, lat] = interpFlightPosition(f, dtSeconds);
-    if (!inView(lat, lng, bounds)) continue;
+    if (!passesViewFilter(lat, lng, bounds, serverBboxScoped)) continue;
 
     const alertColor = ('alert_color' in f ? f.alert_color : '') || 'white';
     const acType = classifyAircraft(f.model, f.aircraft_category);
@@ -334,6 +348,7 @@ function buildShipsGeoJSONWorker(
   activeLayers: DynamicMapLayersBuildPayload['activeLayers'],
   bounds: BoundsTuple,
   dtSeconds: number,
+  serverBboxScoped: boolean,
 ): FC {
   if (
     !ships?.length ||
@@ -353,7 +368,7 @@ function buildShipsGeoJSONWorker(
     const s = ships[i];
     if (s.lat == null || s.lng == null) continue;
     const [iLng, iLat] = interpShipPosition(s, dtSeconds);
-    if (!inView(iLat, iLng, bounds)) continue;
+    if (!passesViewFilter(iLat, iLng, bounds, serverBboxScoped)) continue;
     if (s.type === 'carrier') continue;
 
     const isTrackedYacht = Boolean(s.yacht_alert);
@@ -394,6 +409,7 @@ function buildSigintGeoJSONWorker(
   signals: SigintSignal[] | undefined,
   source: 'meshtastic' | 'aprs',
   bounds: BoundsTuple,
+  serverBboxScoped: boolean,
 ): FC {
   if (!signals?.length) return null;
   const wanted =
@@ -405,7 +421,7 @@ function buildSigintGeoJSONWorker(
   for (let i = 0; i < signals.length; i += 1) {
     const sig = signals[i];
     if (!wanted(sig) || sig.lat == null || sig.lng == null) continue;
-    if (!inView(sig.lat, sig.lng, bounds)) continue;
+    if (!passesViewFilter(sig.lat, sig.lng, bounds, serverBboxScoped)) continue;
     features.push({
       type: 'Feature',
       properties: {
@@ -537,6 +553,7 @@ function applyFilters(activeFilters: Record<string, string[]> | undefined) {
 function buildDynamicLayers(payload: DynamicMapLayersBuildPayload): DynamicMapLayersResult {
   const trackedIcaos = new Set(payload.trackedIcaos);
   const filtered = applyFilters(payload.activeFilters);
+  const serverBboxScoped = Boolean(payload.serverBboxScoped);
   return {
     commercialFlightsGeoJSON: payload.activeLayers.flights
       ? buildFlightLayerGeoJSONWorker(
@@ -545,6 +562,7 @@ function buildDynamicLayers(payload: DynamicMapLayersBuildPayload): DynamicMapLa
           payload.bounds,
           payload.dtSeconds,
           trackedIcaos,
+          serverBboxScoped,
         )
       : null,
     privateFlightsGeoJSON: payload.activeLayers.private
@@ -554,6 +572,7 @@ function buildDynamicLayers(payload: DynamicMapLayersBuildPayload): DynamicMapLa
           payload.bounds,
           payload.dtSeconds,
           trackedIcaos,
+          serverBboxScoped,
         )
       : null,
     privateJetsGeoJSON: payload.activeLayers.jets
@@ -563,6 +582,7 @@ function buildDynamicLayers(payload: DynamicMapLayersBuildPayload): DynamicMapLa
           payload.bounds,
           payload.dtSeconds,
           trackedIcaos,
+          serverBboxScoped,
         )
       : null,
     militaryFlightsGeoJSON: payload.activeLayers.military
@@ -572,22 +592,29 @@ function buildDynamicLayers(payload: DynamicMapLayersBuildPayload): DynamicMapLa
           payload.bounds,
           payload.dtSeconds,
           trackedIcaos,
+          serverBboxScoped,
         )
       : null,
     trackedFlightsGeoJSON: payload.activeLayers.tracked
-      ? buildTrackedFlightsGeoJSONWorker(filtered.tracked, payload.bounds, payload.dtSeconds)
+      ? buildTrackedFlightsGeoJSONWorker(
+          filtered.tracked,
+          payload.bounds,
+          payload.dtSeconds,
+          serverBboxScoped,
+        )
       : null,
     shipsGeoJSON: buildShipsGeoJSONWorker(
       filtered.ships,
       payload.activeLayers,
       payload.bounds,
       payload.dtSeconds,
+      serverBboxScoped,
     ),
     meshtasticGeoJSON: payload.activeLayers.sigint_meshtastic
-      ? buildSigintGeoJSONWorker(dynamicData.sigint, 'meshtastic', payload.bounds)
+      ? buildSigintGeoJSONWorker(dynamicData.sigint, 'meshtastic', payload.bounds, serverBboxScoped)
       : null,
     aprsGeoJSON: payload.activeLayers.sigint_aprs
-      ? buildSigintGeoJSONWorker(dynamicData.sigint, 'aprs', payload.bounds)
+      ? buildSigintGeoJSONWorker(dynamicData.sigint, 'aprs', payload.bounds, serverBboxScoped)
       : null,
   };
 }

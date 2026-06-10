@@ -4122,12 +4122,10 @@ export function useMeshChatController({
   const dmTrustHint = buildDmTrustHint(selectedContactInfo);
   const dmTrustPrimaryAction = dmTrustPrimaryActionLabel(selectedContactInfo);
   const wormholeDescriptor = getWormholeIdentityDescriptor();
-  const dashboardRestrictedTab: boolean = activeTab === 'infonet' || activeTab === 'dms';
-  const dashboardRestrictedTitle = activeTab === 'infonet' ? 'INFONET RESTRICTED' : 'DEAD DROP RESTRICTED';
+  const dashboardRestrictedTab: boolean = activeTab === 'infonet';
+  const dashboardRestrictedTitle = 'INFONET RESTRICTED';
   const dashboardRestrictedDetail =
-    activeTab === 'infonet'
-      ? 'Private Wormhole gate activity is staying in the terminal for this build. Dashboard integration is coming soon.'
-      : 'Secure Dead Drop stays in the terminal for this build. Dashboard inbox and compose surfaces are coming soon.';
+    'Private Wormhole gate activity is staying in the terminal for this build. Dashboard integration is coming soon.';
   const selectedGateKey = selectedGate.trim().toLowerCase();
   const selectedGatePersonaList = selectedGateKey ? gatePersonas[selectedGateKey] || [] : [];
   const selectedGateActivePersonaId = selectedGateKey ? activeGatePersonaId[selectedGateKey] || '' : '';

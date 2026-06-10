@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useRef } from 'react';
+import AgentShellPanel from './AgentShellPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Antenna,
@@ -89,6 +90,7 @@ function describeGateCompatReason(reason: string, gateId: string): string {
 // NO direct trust-mutating imports — all mutations go through the hook.
 
 const MeshChat = React.memo(function MeshChat(props: MeshChatProps) {
+  const panelBoxRef = useRef<HTMLDivElement>(null);
   const ctrl = useMeshChatController(props);
   const {
     // UI state
@@ -398,6 +400,7 @@ const MeshChat = React.memo(function MeshChat(props: MeshChatProps) {
     >
       {/* Single unified box — matches Data Layers panel skin */}
       <div
+        ref={panelBoxRef}
         className={`bg-[#0a0a0a]/90 backdrop-blur-sm border border-cyan-900/40 flex flex-col relative overflow-hidden`}
         style={{ boxShadow: '0 0 15px rgba(8,145,178,0.06), inset 0 0 20px rgba(0,0,0,0.4)', ...(expanded ? { flex: '1 1 0', minHeight: 0 } : {}) }}
       >
@@ -435,16 +438,15 @@ const MeshChat = React.memo(function MeshChat(props: MeshChatProps) {
                 { key: 'meshtastic' as Tab, label: 'MESH', icon: <Radio size={10} />, badge: 0 },
                 {
                   key: 'dms' as Tab,
-                  label: 'DEAD DROP',
-                  icon: <Lock size={10} />,
-                  badge: totalDmNotify,
+                  label: 'AGENT SHELL',
+                  icon: <Terminal size={10} />,
+                  badge: 0,
                 },
               ].map((tab) => (
                 <button
                   key={tab.key}
                   onClick={() => {
                     setActiveTab(tab.key);
-                    if (tab.key === 'dms') setDmView('contacts');
                   }}
                   className={`flex-1 flex items-center justify-center gap-1 py-1.5 text-[12px] font-mono tracking-wider transition-colors ${
                     activeTab === tab.key
@@ -541,11 +543,17 @@ const MeshChat = React.memo(function MeshChat(props: MeshChatProps) {
 
             {/* CONTENT AREA */}
             <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+              {activeTab === 'dms' && (
+                <AgentShellPanel
+                  anchorRef={panelBoxRef}
+                  active={expanded && activeTab === 'dms'}
+                />
+              )}
               {dashboardRestrictedTab && (
                 <div className="flex-1 overflow-y-auto styled-scrollbar px-4 py-6 border-l-2 border-cyan-800/25 flex items-center justify-center">
                   <div className="max-w-md w-full border border-cyan-900/30 bg-cyan-950/10 px-5 py-6 text-center">
                     <div className="inline-flex items-center justify-center w-11 h-11 border border-cyan-700/40 bg-black/30 text-cyan-300 mb-3">
-                      {activeTab === 'infonet' ? <Shield size={17} /> : <Lock size={17} />}
+                      <Shield size={17} />
                     </div>
                     <div className="text-sm font-mono tracking-[0.24em] text-cyan-300 mb-2">
                       {dashboardRestrictedTitle}
@@ -1484,8 +1492,8 @@ const MeshChat = React.memo(function MeshChat(props: MeshChatProps) {
                 </>
               )}
 
-              {/* ─── Dead Drop Tab ─── */}
-              {!dashboardRestrictedTab && activeTab === 'dms' && (
+              {/* Dead Drop chat UI moved to Infonet Terminal → Messages */}
+              {false && !dashboardRestrictedTab && activeTab === 'dms' && (
                 <>
                   {/* Sub-nav: Contacts | Inbox | Muted | (back to contacts from chat) */}
                   <div className="flex items-center gap-1 px-3 py-1.5 border-b border-[var(--border-primary)]/30 shrink-0">
@@ -2259,21 +2267,26 @@ const MeshChat = React.memo(function MeshChat(props: MeshChatProps) {
             </div>
 
             {/* INPUT BAR */}
-            {dashboardRestrictedTab ? (
+            {activeTab === 'dms' ? (
+              <div className="mx-2 mb-2 mt-1 border border-cyan-800/40 bg-black/30 shrink-0 relative">
+                <span className="absolute -top-[7px] left-3 bg-[var(--bg-primary)] px-1 text-[11px] font-mono text-cyan-700/60 tracking-[0.15em] select-none">
+                  SHELL
+                </span>
+                <div className="px-3 py-2.5 text-[13px] font-mono text-[var(--text-secondary)] leading-relaxed">
+                  Local bash/cmd launches here (desktop). Set your own working directory in Settings.
+                </div>
+              </div>
+            ) : dashboardRestrictedTab ? (
               <div className="mx-2 mb-2 mt-1 border border-cyan-800/40 bg-black/30 shrink-0 relative">
                 <span className="absolute -top-[7px] left-3 bg-[var(--bg-primary)] px-1 text-[11px] font-mono text-cyan-700/60 tracking-[0.15em] select-none">
                   ACCESS
                 </span>
                 <div className="px-3 py-3 flex flex-col gap-2">
                   <div className="text-[12px] font-mono tracking-widest text-[var(--text-muted)] uppercase">
-                    {activeTab === 'infonet'
-                      ? '→ PRIVATE INFONET / TERMINAL ONLY'
-                      : '→ DEAD DROP / TERMINAL ONLY'}
+                    → PRIVATE INFONET / TERMINAL ONLY
                   </div>
                   <div className="text-[13px] font-mono text-[var(--text-secondary)] leading-[1.65]">
-                    {activeTab === 'infonet'
-                      ? 'Private gate posting and reading are restricted to the terminal for now. Dashboard support is coming soon.'
-                      : 'Secure messages are restricted to the terminal for now. Dashboard inbox, requests, and compose are coming soon.'}
+                    Private gate posting and reading are restricted to the terminal for now. Dashboard support is coming soon.
                   </div>
                   <button
                     onClick={openTerminal}

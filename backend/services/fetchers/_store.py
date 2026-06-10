@@ -70,6 +70,10 @@ class DashboardData(TypedDict, total=False):
     sar_anomalies: List[Dict[str, Any]]
     sar_aoi_coverage: List[Dict[str, Any]]
     road_corridor_trends: Dict[str, Any]
+    malware_threats: Dict[str, Any]
+    cyber_threats: Dict[str, Any]
+    scm_suppliers: Dict[str, Any]
+    telegram_osint: Dict[str, Any]
 
 
 # In-memory store
@@ -121,6 +125,10 @@ latest_data: DashboardData = {
     "sar_anomalies": [],
     "sar_aoi_coverage": [],
     "road_corridor_trends": {"updated_at": None, "corridors": []},
+    "malware_threats": {"threats": [], "total": 0, "timestamp": None},
+    "cyber_threats": {"threats": [], "stats": {}},
+    "scm_suppliers": {"suppliers": [], "total": 0, "critical_count": 0},
+    "telegram_osint": {"posts": [], "total": 0, "geolocated": 0, "timestamp": None},
 }
 
 # Per-source freshness timestamps
@@ -331,6 +339,11 @@ active_layers: dict[str, bool] = {
     "crowdthreat": False,
     "sar": True,
     "road_corridor_trends": False,
+    "malware_c2": False,
+    "submarine_cables": False,
+    "scm_suppliers": False,
+    "cyber_threats": False,
+    "telegram_osint": True,
 }
 
 

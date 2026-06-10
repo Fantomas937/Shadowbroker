@@ -270,6 +270,82 @@ class ShadowBrokerClient:
         r = await self._get("/api/ai/channel/status")
         return r.json()
 
+    @staticmethod
+    def unwrap_channel_result(resp: dict) -> dict:
+        """Extract inner command payload from /api/ai/channel/command response."""
+        if not isinstance(resp, dict):
+            return {}
+        result = resp.get("result")
+        if not isinstance(result, dict):
+            return {}
+        if result.get("ok"):
+            data = result.get("data")
+            return data if isinstance(data, dict) else {}
+        return result
+
+    async def route_query(
+        self,
+        text: str,
+        *,
+        lat: float | None = None,
+        lng: float | None = None,
+        radius_km: float = 50,
+        compact: bool = True,
+    ) -> dict:
+        """Server-side intent routing — returns recommended command (no LLM)."""
+        args: dict[str, Any] = {"text": text, "radius_km": radius_km, "compact": compact}
+        if lat is not None:
+            args["lat"] = lat
+        if lng is not None:
+            args["lng"] = lng
+        resp = await self.send_command("route_query", args)
+        return self.unwrap_channel_result(resp)
+
+    async def run_playbook(self, name: str, args: dict | None = None) -> dict:
+        """Execute a named server playbook (batched, concurrent)."""
+        payload = {"name": name, **(args or {})}
+        resp = await self.send_command("run_playbook", payload)
+        return self.unwrap_channel_result(resp)
+
+    async def ask(
+        self,
+        question: str,
+        *,
+        lat: float | None = None,
+        lng: float | None = None,
+        radius_km: float = 50,
+        execute: bool = True,
+    ) -> dict:
+        """Natural-language read: route_query → recommended command (one round-trip or two)."""
+        route = await self.route_query(
+            question,
+            lat=lat,
+            lng=lng,
+            radius_km=radius_km,
+            compact=True,
+        )
+        if not route:
+            return {"ok": False, "detail": "route_query returned no plan"}
+
+        if not execute:
+            return {"ok": True, "route": route}
+
+        recommended = route.get("recommended") or {}
+        cmd = str(recommended.get("cmd", "") or "").strip()
+        cmd_args = recommended.get("args") or {}
+        if not cmd:
+            return {"ok": False, "detail": "route produced no command", "route": route}
+
+        exec_resp = await self.send_command(cmd, cmd_args)
+        exec_inner = exec_resp.get("result") if isinstance(exec_resp.get("result"), dict) else {}
+        return {
+            "ok": bool(exec_resp.get("ok") and exec_inner.get("ok")),
+            "route": route,
+            "command": cmd,
+            "args": cmd_args,
+            "result": exec_inner,
+        }
+
     async def send_batch(self, commands: list[dict]) -> dict:
         """Send multiple commands in a single HTTP round-trip.
 
@@ -721,6 +797,36 @@ class ShadowBrokerClient:
         """Lightweight telemetry summary - counts only."""
         r = await self._get("/api/ai/summary")
         return r.json()
+
+    async def osint_lookup(self, tool: str, **kwargs) -> dict:
+        """Run a passive OSINT recon lookup (IP, DNS, WHOIS, sanctions, CVE, etc.)."""
+        args = {"tool": tool, **kwargs}
+        result = await self.send_command("osint_lookup", args)
+        if not result.get("ok"):
+            raise RuntimeError(result.get("detail") or "osint_lookup failed")
+        return result.get("data") or result
+
+    async def osint_tools(self) -> dict:
+        """List available OSINT recon tools and entity-expand types."""
+        result = await self.send_command("osint_tools")
+        if not result.get("ok"):
+            raise RuntimeError(result.get("detail") or "osint_tools failed")
+        return result.get("data") or result
+
+    async def entity_expand(self, entity_type: str, entity_id: str, **kwargs) -> dict:
+        """Expand an entity relationship graph."""
+        args = {"type": entity_type, "id": entity_id, **kwargs}
+        result = await self.send_command("entity_expand", args)
+        if not result.get("ok"):
+            raise RuntimeError(result.get("detail") or "entity_expand failed")
+        return result.get("data") or result
+
+    async def osint_sweep(self, ip: str, cidr: int = 24) -> dict:
+        """Active subnet device discovery (requires full OpenClaw access tier)."""
+        result = await self.send_command("osint_sweep", {"ip": ip, "cidr": cidr})
+        if not result.get("ok"):
+            raise RuntimeError(result.get("detail") or "osint_sweep failed")
+        return result.get("data") or result
 
     # ── Encrypted DMs ─────────────────────────────────────────────
 

@@ -321,7 +321,7 @@ function EmissionsEstimateBlock({ flight }: { flight: any }) {
     );
 }
 
-function NewsFeedInner({ selectedEntity, regionDossier, regionDossierLoading, onArticleClick }: { selectedEntity?: SelectedEntity | null, regionDossier?: RegionDossier | null, regionDossierLoading?: boolean, onArticleClick?: (idx: number, lat?: number, lng?: number, title?: string) => void }) {
+function NewsFeedInner({ selectedEntity, regionDossier, regionDossierLoading, onArticleClick, onExpandEntityGraph }: { selectedEntity?: SelectedEntity | null, regionDossier?: RegionDossier | null, regionDossierLoading?: boolean, onArticleClick?: (idx: number, lat?: number, lng?: number, title?: string) => void, onExpandEntityGraph?: () => void }) {
     const data = useDataKeys([
       'news', 'fimi', 'commercial_flights', 'private_flights', 'private_jets',
       'military_flights', 'tracked_flights', 'ships', 'gdelt', 'liveuamap',
@@ -1097,6 +1097,15 @@ function NewsFeedInner({ selectedEntity, regionDossier, regionDossierLoading, on
                                 </a>
                             </div>
                         )}
+                        {onExpandEntityGraph && (
+                            <button
+                                type="button"
+                                onClick={onExpandEntityGraph}
+                                className="w-full py-1.5 text-[10px] font-mono tracking-wider border border-cyan-700/40 text-cyan-400 hover:bg-cyan-950/30 transition-colors"
+                            >
+                                INTEL GRAPH →
+                            </button>
+                        )}
                     </div>
                 </motion.div>
             )
@@ -1205,6 +1214,15 @@ function NewsFeedInner({ selectedEntity, regionDossier, regionDossierLoading, on
                                     accent={ship.type === 'carrier' ? 'hover:border-orange-500/50' : 'hover:border-cyan-500/50'}
                                 />
                             </div>
+                        )}
+                        {onExpandEntityGraph && (
+                            <button
+                                type="button"
+                                onClick={onExpandEntityGraph}
+                                className="w-full py-1.5 text-[10px] font-mono tracking-wider border border-cyan-700/40 text-cyan-400 hover:bg-cyan-950/30 transition-colors"
+                            >
+                                INTEL GRAPH →
+                            </button>
                         )}
                     </div>
                 </motion.div>

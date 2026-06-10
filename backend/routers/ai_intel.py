@@ -2712,7 +2712,7 @@ async def bootstrap_hmac_secret(request: Request):
         }
 
     new_secret = secrets.token_hex(24)  # 48 chars
-    _write_env_value("OPENCLAW_HMAC_SECRET", new_secret)
+    await asyncio.to_thread(_write_env_value, "OPENCLAW_HMAC_SECRET", new_secret)
     get_settings.cache_clear()
 
     return {
@@ -2771,7 +2771,7 @@ async def regenerate_hmac_secret(request: Request):
     from services.config import get_settings
 
     new_secret = secrets.token_hex(24)  # 48 chars
-    _write_env_value("OPENCLAW_HMAC_SECRET", new_secret)
+    await asyncio.to_thread(_write_env_value, "OPENCLAW_HMAC_SECRET", new_secret)
     get_settings.cache_clear()
 
     return JSONResponse(
@@ -2795,7 +2795,7 @@ async def set_access_tier(request: Request, body: dict):
     if tier not in ("full", "restricted"):
         raise HTTPException(400, "Invalid tier. Must be 'full' or 'restricted'.")
 
-    _write_env_value("OPENCLAW_ACCESS_TIER", tier)
+    await asyncio.to_thread(_write_env_value, "OPENCLAW_ACCESS_TIER", tier)
     get_settings.cache_clear()
 
     return {"ok": True, "access_tier": tier}

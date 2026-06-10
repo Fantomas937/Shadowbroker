@@ -456,7 +456,9 @@ async def api_prediction_markets_opt_in(body: PredictionMarketsOptInUpdate, requ
     from routers.ai_intel import _write_env_value
 
     set_prediction_markets_ui_opt_in(body.opted_in)
-    _write_env_value("PREDICTION_MARKETS_ENABLED", "true" if body.opted_in else "false")
+    await asyncio.to_thread(
+        _write_env_value, "PREDICTION_MARKETS_ENABLED", "true" if body.opted_in else "false"
+    )
     os.environ["PREDICTION_MARKETS_ENABLED"] = "true" if body.opted_in else "false"
     get_settings.cache_clear()
 
@@ -566,9 +568,11 @@ async def live_data(request: Request):
     etag = _current_etag(prefix="live|full|")
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
-    from services.fetchers._store import get_latest_data_deepcopy_snapshot
+    # Read-only refs snapshot: _live_data_json_bytes -> _sanitize_payload builds
+    # fresh containers during serialization, so no deepcopy is needed here.
+    from services.fetchers._store import get_latest_data_refs_snapshot
 
-    payload = get_latest_data_deepcopy_snapshot()
+    payload = get_latest_data_refs_snapshot()
     return Response(
         content=_live_data_json_bytes(payload),
         media_type="application/json",

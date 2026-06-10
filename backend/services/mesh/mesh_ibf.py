@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import heapq
 from dataclasses import dataclass
 from typing import Iterable, List, Tuple
 
@@ -161,16 +162,16 @@ def build_iblt(keys: Iterable[bytes], size: int) -> IBLT:
 def minhash_sketch(keys: Iterable[bytes], k: int) -> List[int]:
     if k <= 0:
         return []
-    mins: List[int] = []
+    # Max-heap of the k smallest hashes (stored negated) — O(n log k)
+    # instead of re-sorting the sketch on every insertion.
+    heap: List[int] = []
     for key in keys:
         h = _hash64(key, 0x9E3779B97F4A7C15)
-        if len(mins) < k:
-            mins.append(h)
-            mins.sort()
-        elif h < mins[-1]:
-            mins[-1] = h
-            mins.sort()
-    return mins
+        if len(heap) < k:
+            heapq.heappush(heap, -h)
+        elif h < -heap[0]:
+            heapq.heapreplace(heap, -h)
+    return sorted(-x for x in heap)
 
 
 def minhash_similarity(a: Iterable[int], b: Iterable[int]) -> float:

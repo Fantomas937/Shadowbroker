@@ -220,10 +220,10 @@ def fetch_news():
 
             title = entry.get('title', '')
             summary = entry.get('summary', '')
+            text = (title + " " + summary).lower()
 
             _seismic_kw = ["earthquake", "seismic", "quake", "tremor", "magnitude", "richter"]
-            _text_lower = (title + " " + summary).lower()
-            if any(kw in _text_lower for kw in _seismic_kw):
+            if any(kw in text for kw in _seismic_kw):
                 continue
 
             if source_name == "GDACS":
@@ -240,7 +240,6 @@ def fetch_news():
                     'mobilization', 'proxy', 'insurgent', 'coup',
                     'assassination', 'bioweapon', 'chemical',
                 ]
-                text = (title + " " + summary).lower()
 
                 risk_score = 1
                 for kw in risk_keywords:
@@ -259,7 +258,6 @@ def fetch_news():
                 lat, lng = coords[1], coords[0]
 
             if lat is None:
-                text = (title + " " + summary).lower()
                 result = _resolve_coords(text)
                 if result:
                     lat, lng = result

@@ -257,10 +257,22 @@ def get_latest_data_subset(*keys: str) -> DashboardData:
 
 
 def get_latest_data_deepcopy_snapshot() -> DashboardData:
-    """Deep-copy the full dashboard for legacy /api/live-data consumers."""
+    """Deep-copy the full dashboard for callers that need to mutate the result."""
     with _data_lock:
         items = list(latest_data.items())
     return {key: copy.deepcopy(value) for key, value in items}
+
+
+def get_latest_data_refs_snapshot() -> DashboardData:
+    """Return a shallow snapshot of all top-level values for read-only callers.
+
+    Writers replace top-level values under the lock instead of mutating them
+    in place, so the referenced values stay stable after the lock is released
+    as long as callers do not modify them. Avoids the full-store deepcopy,
+    which is far too expensive for per-request endpoint use.
+    """
+    with _data_lock:
+        return dict(latest_data)
 
 
 def get_latest_data_subset_refs(*keys: str) -> DashboardData:

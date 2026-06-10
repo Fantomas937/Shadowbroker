@@ -1209,6 +1209,14 @@ def stop_scheduler():
 
 
 def get_latest_data():
-    from services.fetchers._store import get_latest_data_deepcopy_snapshot
+    """Read-only snapshot of the dashboard store (top-level refs, no deepcopy).
 
-    return get_latest_data_deepcopy_snapshot()
+    Every caller treats the result as read-only, so the full-store deepcopy
+    this used to do (tens of MB per call on hot endpoints like /api/health
+    and /api/oracle/region-intel, executed on the event loop) is unnecessary.
+    Callers that need to mutate the result must use
+    get_latest_data_deepcopy_snapshot() instead.
+    """
+    from services.fetchers._store import get_latest_data_refs_snapshot
+
+    return get_latest_data_refs_snapshot()

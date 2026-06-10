@@ -1510,7 +1510,7 @@ function NewsFeedInner({ selectedEntity, regionDossier, regionDossierLoading, on
                                 if (next && !aiSummary) {
                                     setAiSummaryLoading(true);
                                     fetch('/api/ai/news/summary')
-                                        .then(r => r.json())
+                                        .then(r => (r.ok ? r.json() : null))
                                         .then(d => { setAiSummary(d); setAiSummaryLoading(false); })
                                         .catch(() => setAiSummaryLoading(false));
                                 }
@@ -1685,7 +1685,7 @@ function NewsFeedInner({ selectedEntity, regionDossier, regionDossierLoading, on
                                             setAiSummaryLoading(true);
                                             setAiSummary(null);
                                             fetch('/api/ai/news/summary')
-                                                .then(r => r.json())
+                                                .then(r => (r.ok ? r.json() : null))
                                                 .then(d => { setAiSummary(d); setAiSummaryLoading(false); })
                                                 .catch(() => setAiSummaryLoading(false));
                                         }}

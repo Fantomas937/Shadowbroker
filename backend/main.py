@@ -9840,7 +9840,7 @@ async def api_wormhole_join(request: Request):
 
         tor_result = await asyncio.to_thread(tor_service.start)
         if tor_result.get("ok"):
-            _write_env_value("MESH_ARTI_ENABLED", "true")
+            await asyncio.to_thread(_write_env_value, "MESH_ARTI_ENABLED", "true")
             get_settings.cache_clear()
     except Exception as exc:
         tor_result = {"ok": False, "detail": str(exc or type(exc).__name__)}

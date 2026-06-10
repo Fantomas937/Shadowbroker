@@ -335,7 +335,7 @@ async def api_tor_start(request: Request):
         try:
             from routers.ai_intel import _write_env_value
             from services.config import get_settings
-            _write_env_value("MESH_ARTI_ENABLED", "true")
+            await asyncio.to_thread(_write_env_value, "MESH_ARTI_ENABLED", "true")
             get_settings.cache_clear()
         except Exception:
             pass  # Non-fatal — hidden service still works without mesh Arti
@@ -383,7 +383,7 @@ async def api_reset_all_agent_credentials(request: Request):
     # 1. Regenerate HMAC key
     new_secret = secrets.token_hex(24)
     from routers.ai_intel import _write_env_value
-    _write_env_value("OPENCLAW_HMAC_SECRET", new_secret)
+    await asyncio.to_thread(_write_env_value, "OPENCLAW_HMAC_SECRET", new_secret)
     results["hmac"] = "regenerated"
 
     # 2. Revoke agent identity (Ed25519 keypair)

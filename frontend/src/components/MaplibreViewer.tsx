@@ -633,13 +633,19 @@ const MaplibreViewer = ({
     if (callsign && callsign !== prevCallsign.current) {
       prevCallsign.current = callsign;
       setDynamicRoute(null);
+      const requested = callsign;
+      // Guard async callbacks on the latest requested callsign instead of this
+      // effect run's isMounted flag: the effect re-runs on every data tick, so
+      // isMounted would drop any response slower than one tick and the route
+      // would stay empty until the selection changes again. The same guard
+      // also stops a slow stale response from overwriting a newer selection.
       fetch(`${API_BASE}/api/route/${callsign}?lat=${entityLat}&lng=${entityLng}`)
-        .then((res) => res.json())
+        .then((res) => (res.ok ? res.json() : null))
         .then((routeData) => {
-          if (isMounted) setDynamicRoute(routeData);
+          if (prevCallsign.current === requested) setDynamicRoute(routeData ?? null);
         })
         .catch(() => {
-          if (isMounted) setDynamicRoute(null);
+          if (prevCallsign.current === requested) setDynamicRoute(null);
         });
     } else if (!callsign) {
       prevCallsign.current = null;
@@ -740,7 +746,7 @@ const MaplibreViewer = ({
     }
     let alive = true;
     fetch(`${API_BASE}/api/oracle/region-intel?lat=${lat}&lng=${lng}`)
-      .then(r => r.json())
+      .then(r => (r.ok ? r.json() : null))
       .then(d => { if (alive) setOracleIntel(d); })
       .catch(() => { if (alive) setOracleIntel(null); });
     return () => { alive = false; };
